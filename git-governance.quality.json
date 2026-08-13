@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "defaults": {
+    "includeFamilies": [
+      "feature",
+      "fix",
+      "docs",
+      "refactor",
+      "chore",
+      "test",
+      "perf",
+      "hotfix"
+    ]
+  },
+  "gates": [
+    {
+      "name": "dependency-authority-source-quality",
+      "command": "go",
+      "args": [
+        "run",
+        "-mod=readonly",
+        "./cmd/build"
+      ],
+      "timeout": "15m"
+    }
+  ]
+}
