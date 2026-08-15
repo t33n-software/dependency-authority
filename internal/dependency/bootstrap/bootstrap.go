@@ -11,12 +11,12 @@ import (
 	"io"
 	"time"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/adapters/inbound/config"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/application/admission"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/application/intake"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/application/promotion"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/application/revalidation"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/application/revocation"
+	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/revalidation"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/revocation"
 )
 
 // Operation identifies a dependency authority lane.

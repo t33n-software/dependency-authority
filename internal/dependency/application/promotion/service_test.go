@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/admission"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/approval"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/candidate"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/evidence"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/admission"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/approval"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 )
 
 const validDigest = "sha256:3b8f49c12b24cbbd6a4a0e6e2b2a4a4e8f0e1d2c3b4a59687766554433221100"

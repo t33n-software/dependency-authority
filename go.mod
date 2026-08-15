@@ -1,4 +1,4 @@
-module github.com/CyberT33N/dependency-authority
+module github.com/t33n-software/dependency-authority
 
 go 1.26
 

@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/admission"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/approval"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/candidate"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/evidence"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/admission"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/approval"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 )
 
 // Candidates persists and loads dependency candidates.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/evidence"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 )
 
 // Revocation is a revocation decision with an active download block.
