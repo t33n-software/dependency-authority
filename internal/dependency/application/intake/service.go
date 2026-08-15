@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/candidate"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 )
 
 // Upstream resolves package content digests from the controlled upstream

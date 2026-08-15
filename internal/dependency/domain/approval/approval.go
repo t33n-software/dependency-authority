@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/evidence"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 )
 
 // Approval is a time-bounded promotion approval bound to approval evidence.

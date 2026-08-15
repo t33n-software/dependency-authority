@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/candidate"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 )
 
 func envWith(zone string, ecosystem string) func(string) string {

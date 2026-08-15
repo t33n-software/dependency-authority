@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/candidate"
-	"github.com/CyberT33N/dependency-authority/internal/dependency/domain/evidence"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 )
 
 // Policy is the admission contract for one ecosystem.
