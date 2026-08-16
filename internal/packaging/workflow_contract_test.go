@@ -220,7 +220,7 @@ func TestModuleIdentityAndQualityContract(t *testing.T) {
 	for _, required := range []string{
 		"module github.com/t33n-software/dependency-authority",
 		"go 1.26",
-		"toolchain go1.26.5",
+		"toolchain go1.26.6",
 	} {
 		if !strings.Contains(goMod, required) {
 			t.Fatalf("go.mod does not contain %q", required)
@@ -240,6 +240,63 @@ func TestModuleIdentityAndQualityContract(t *testing.T) {
 	lefthook := readRepositoryFile(t, "lefthook.yml")
 	if !strings.Contains(lefthook, "go run -mod=readonly ./cmd/build") {
 		t.Fatal("lefthook.yml does not run the source-quality gate")
+	}
+}
+
+func TestGoToolchainAndBuildToolingContract(t *testing.T) {
+	toolsMod := readRepositoryFile(t, filepath.Join("tools", "go.mod"))
+	for _, required := range []string{
+		"module github.com/t33n-software/dependency-authority/tools",
+		"toolchain go1.26.6",
+		"github.com/evilmartians/lefthook/v2",
+		"golang.org/x/vuln/cmd/govulncheck",
+		"honnef.co/go/tools/cmd/staticcheck",
+	} {
+		if !strings.Contains(toolsMod, required) {
+			t.Fatalf("tools/go.mod does not contain %q", required)
+		}
+	}
+	if _, err := os.Stat(repositoryPath("tools", "go.sum")); err != nil {
+		t.Fatalf("tools/go.sum is missing: %v", err)
+	}
+
+	ci := readRepositoryFile(t, ".github/workflows/ci.yml")
+	for _, required := range []string{
+		`go-version: "1.26.6"`,
+		`test "$(go env GOVERSION)" = "go1.26.6"`,
+		"schedule:",
+		"cron:",
+	} {
+		if !strings.Contains(ci, required) {
+			t.Fatalf("CI workflow does not contain %q", required)
+		}
+	}
+
+	codeql := readRepositoryFile(t, ".github/workflows/codeql.yml")
+	for _, required := range []string{
+		`go-version: "1.26.6"`,
+		`test "$(go env GOVERSION)" = "go1.26.6"`,
+	} {
+		if !strings.Contains(codeql, required) {
+			t.Fatalf("CodeQL workflow does not contain %q", required)
+		}
+	}
+
+	lefthook := readRepositoryFile(t, "lefthook.yml")
+	for _, required := range []string{
+		"commit-msg:",
+		`git-governance --interactive never commit validate --message-file "{1}"`,
+		"pre-push:",
+		"go run -mod=readonly ./cmd/build",
+	} {
+		if !strings.Contains(lefthook, required) {
+			t.Fatalf("lefthook.yml does not contain %q", required)
+		}
+	}
+
+	traceability := readRepositoryFile(t, filepath.Join("docs", "TRACEABILITY.md"))
+	if !strings.Contains(traceability, "DA-3") {
+		t.Fatal("TRACEABILITY.md does not contain DA-3")
 	}
 }
 

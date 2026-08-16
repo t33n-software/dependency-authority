@@ -55,9 +55,13 @@ func TestRunWithNilContextUsesBackground(t *testing.T) {
 	runner := func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("ok  \texample/pkg\tcoverage: 100.0% of statements\n"), nil
 	}
-	if code := run(nil, nil, &stdout, &stderr, runner); code != 0 {
+	if code := run(testNilContext(), nil, &stdout, &stderr, runner); code != 0 {
 		t.Fatalf("run() = %d, want 0", code)
 	}
+}
+
+func testNilContext() context.Context {
+	return nil
 }
 
 func TestRunReportsCommandError(t *testing.T) {
