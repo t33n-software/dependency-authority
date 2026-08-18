@@ -85,12 +85,13 @@ without source changes.
 - `internal/packaging/` contains the same-package workflow contract tests.
 - `test/contract/` contains the exported-API contract tests;
   `test/integration/` receives the trust-zone adapter integration tests.
-- `docs/` contains architecture, development, and GitHub Ruleset
+- `docs/` contains architecture, development, and hosting-platform convention
   documentation.
 
 ## Governance
 
 Governed changes land through ticket branches and pull requests into
-`develop`. `main` is the production and control-plane truth. See
-`docs/hosting-platforms/github/rulesets/` for the importable shared-line
-Rulesets and their import timing.
+`develop`. `main` is the production and control-plane truth. Branch
+governance is bound through the organization-level rule-sets; see
+`docs/conventions/hosting-plattform/github/rule-sets/` for the canonical
+source and the rule-set family of this repository.
