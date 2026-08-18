@@ -44,7 +44,9 @@ Each controller binds `DEPENDENCY_AUTHORITY_ZONE` and
 zone binding, and wires its lane service through the ports in
 `internal/dependency/bootstrap`. Binding fails closed: a controller with
 unbound ports never executes its lane. The outbound adapter implementations
-follow with the trust-zone infrastructure.
+live in this repository under `internal/dependency/adapters/outbound/` and
+arrive with the trust-zone lane enablement (ADR-0002); the domain and
+application core never imports provider SDKs or adapter code.
 
 ## Quality gates
 
@@ -77,7 +79,8 @@ without source changes.
   quarantine, revocation, and evidence domain models.
 - `internal/dependency/application/` contains the five lane use cases.
 - `internal/dependency/adapters/inbound/` contains the environment
-  configuration adapter.
+  configuration adapter; `internal/dependency/adapters/outbound/` receives
+  the trust-zone adapter implementations (ADR-0002).
 - `internal/dependency/bootstrap/` wires the controllers.
 - `internal/packaging/` contains the same-package workflow contract tests.
 - `test/contract/` contains the exported-API contract tests;
