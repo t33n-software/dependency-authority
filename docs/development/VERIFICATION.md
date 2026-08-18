@@ -54,7 +54,9 @@ The `Quality gates (linux-amd64)` check runs the full source-level gate on
 every push and pull request to the shared lines and once per day on a
 schedule. The `Dependency admission review` check blocks unreviewed
 dependency changes. CodeQL code scanning runs with all alerts blocking once
-the shared-line Rulesets are imported.
+the organization-level shared-line rule-sets are imported and active; the
+binding of this repository is documented in
+`docs/conventions/hosting-plattform/github/rule-sets/`.
 
 Lefthook provides the local `commit-msg` hook (`git-governance --interactive
 never commit validate --message-file`) and the pre-push source-quality gate.
