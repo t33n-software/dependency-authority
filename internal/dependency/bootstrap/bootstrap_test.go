@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -80,6 +81,12 @@ func fullPorts() Ports {
 	}
 }
 
+func staticPorts(ports Ports, err error) PortsBuilder {
+	return func(func(string) string) (Ports, error) {
+		return ports, err
+	}
+}
+
 func envWith(zone string, ecosystem string) func(string) string {
 	return func(key string) string {
 		switch key {
@@ -95,7 +102,7 @@ func envWith(zone string, ecosystem string) func(string) string {
 
 func TestRunRejectsInvalidConfiguration(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), OperationIntake, envWith("", ""), fullPorts(), &stdout, &stderr)
+	code := run(context.Background(), OperationIntake, envWith("", ""), staticPorts(fullPorts(), nil), &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("run() = %d, want 2", code)
 	}
@@ -106,7 +113,7 @@ func TestRunRejectsInvalidConfiguration(t *testing.T) {
 
 func TestRunRejectsZoneMismatch(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), OperationIntake, envWith("control", "go"), fullPorts(), &stdout, &stderr)
+	code := run(context.Background(), OperationIntake, envWith("control", "go"), staticPorts(fullPorts(), nil), &stdout, &stderr)
 	if code != 2 {
 		t.Fatalf("run() = %d, want 2", code)
 	}
@@ -115,9 +122,20 @@ func TestRunRejectsZoneMismatch(t *testing.T) {
 	}
 }
 
+func TestRunFailsClosedOnWiringError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), OperationIntake, envWith("intake", "go"), staticPorts(Ports{}, errors.New("bad binding")), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "wire dependency-intake-controller") {
+		t.Fatalf("stderr = %q, want wiring error", stderr.String())
+	}
+}
+
 func TestRunFailsClosedOnUnboundPorts(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), OperationIntake, envWith("intake", "go"), Ports{}, &stdout, &stderr)
+	code := run(context.Background(), OperationIntake, envWith("intake", "go"), staticPorts(Ports{}, nil), &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("run() = %d, want 1", code)
 	}
@@ -128,7 +146,7 @@ func TestRunFailsClosedOnUnboundPorts(t *testing.T) {
 
 func TestRunSuccess(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), OperationIntake, envWith("intake", "go"), fullPorts(), &stdout, &stderr)
+	code := run(context.Background(), OperationIntake, envWith("intake", "go"), staticPorts(fullPorts(), nil), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("run() = %d, want 0; stderr = %q", code, stderr.String())
 	}
@@ -140,7 +158,7 @@ func TestRunSuccess(t *testing.T) {
 func TestLaneWrappers(t *testing.T) {
 	lanes := []struct {
 		name string
-		run  func(context.Context, func(string) string, Ports, io.Writer, io.Writer) int
+		run  func(context.Context, func(string) string, PortsBuilder, io.Writer, io.Writer) int
 		zone string
 	}{
 		{"intake", RunIntake, "intake"},
@@ -152,7 +170,7 @@ func TestLaneWrappers(t *testing.T) {
 	for _, lane := range lanes {
 		t.Run(lane.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := lane.run(context.Background(), envWith(lane.zone, "go"), fullPorts(), &stdout, &stderr)
+			code := lane.run(context.Background(), envWith(lane.zone, "go"), staticPorts(fullPorts(), nil), &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("Run() = %d, want 0; stderr = %q", code, stderr.String())
 			}

@@ -46,31 +46,31 @@ type Ports struct {
 }
 
 // RunIntake runs the intake lane controller.
-func RunIntake(ctx context.Context, lookup func(string) string, ports Ports, stdout io.Writer, stderr io.Writer) int {
-	return run(ctx, OperationIntake, lookup, ports, stdout, stderr)
+func RunIntake(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationIntake, lookup, buildPorts, stdout, stderr)
 }
 
 // RunAdmission runs the admission lane controller.
-func RunAdmission(ctx context.Context, lookup func(string) string, ports Ports, stdout io.Writer, stderr io.Writer) int {
-	return run(ctx, OperationAdmission, lookup, ports, stdout, stderr)
+func RunAdmission(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationAdmission, lookup, buildPorts, stdout, stderr)
 }
 
 // RunPromotion runs the promotion lane controller.
-func RunPromotion(ctx context.Context, lookup func(string) string, ports Ports, stdout io.Writer, stderr io.Writer) int {
-	return run(ctx, OperationPromotion, lookup, ports, stdout, stderr)
+func RunPromotion(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationPromotion, lookup, buildPorts, stdout, stderr)
 }
 
 // RunRevalidation runs the revalidation lane controller.
-func RunRevalidation(ctx context.Context, lookup func(string) string, ports Ports, stdout io.Writer, stderr io.Writer) int {
-	return run(ctx, OperationRevalidation, lookup, ports, stdout, stderr)
+func RunRevalidation(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationRevalidation, lookup, buildPorts, stdout, stderr)
 }
 
 // RunRevocation runs the revocation lane controller.
-func RunRevocation(ctx context.Context, lookup func(string) string, ports Ports, stdout io.Writer, stderr io.Writer) int {
-	return run(ctx, OperationRevocation, lookup, ports, stdout, stderr)
+func RunRevocation(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationRevocation, lookup, buildPorts, stdout, stderr)
 }
 
-func run(_ context.Context, operation Operation, lookup func(string) string, ports Ports, stdout io.Writer, stderr io.Writer) int {
+func run(_ context.Context, operation Operation, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
 	controllerConfig, err := config.FromEnv(lookup)
 	if err != nil {
 		fmt.Fprintln(stderr, "load controller configuration:", err)
@@ -78,6 +78,11 @@ func run(_ context.Context, operation Operation, lookup func(string) string, por
 	}
 	if err := checkZone(operation, controllerConfig.Zone()); err != nil {
 		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	ports, err := buildPorts(lookup)
+	if err != nil {
+		fmt.Fprintf(stderr, "wire dependency-%s-controller: %v\n", operation, err)
 		return 2
 	}
 	if err := bind(operation, ports); err != nil {
