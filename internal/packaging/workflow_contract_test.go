@@ -7,21 +7,16 @@ import (
 	"testing"
 )
 
-func TestSourceWorkflowsEmitOnlyEstablishedSharedLineChecks(t *testing.T) {
+func TestSourceWorkflowsCoverEverySharedLine(t *testing.T) {
 	for _, workflow := range []string{
 		".github/workflows/ci.yml",
 		".github/workflows/codeql.yml",
 		".github/workflows/dependency-review.yml",
 	} {
 		content := readRepositoryFile(t, workflow)
-		for _, forbidden := range []string{"release/**", "support/**"} {
-			if strings.Contains(content, forbidden) {
-				t.Fatalf("%s unexpectedly targets %q before the governed release lifecycle exists", workflow, forbidden)
-			}
-		}
-		for _, required := range []string{"main", "develop"} {
+		for _, required := range []string{"main", "develop", "release/**", "support/**"} {
 			if !strings.Contains(content, required) {
-				t.Fatalf("%s does not target %q", workflow, required)
+				t.Fatalf("%s does not cover the shared line %q; the pre-positioned shared-line rulesets bind every future matching ref from its first commit", workflow, required)
 			}
 		}
 	}
