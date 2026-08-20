@@ -51,6 +51,61 @@ func TestSourceWorkflowsEmitOnlyEstablishedSharedLineChecks(t *testing.T) {
 	}
 }
 
+func TestLaneWorkflowsBindTheProtectedEnvironments(t *testing.T) {
+	lanes := map[string]string{
+		"dep-intake-fetch":   "dependency-intake-controller",
+		"dep-admission":      "dependency-admission-controller",
+		"dep-promotion":      "dependency-promotion-controller",
+		"dep-revalidation":   "dependency-revalidation-controller",
+		"dep-revocation":     "dependency-revocation-controller",
+		"dep-evidence-write": "",
+		"dep-evidence-audit": "",
+	}
+	for lane, controller := range lanes {
+		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
+		for _, required := range []string{
+			"workflow_dispatch:",
+			"environment: " + lane,
+			"id-token: write",
+			"google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093",
+		} {
+			if !strings.Contains(content, required) {
+				t.Fatalf("lane workflow %s does not contain %q", lane, required)
+			}
+		}
+		if controller != "" && !strings.Contains(content, "./cmd/"+controller) {
+			t.Fatalf("lane workflow %s does not build %q", lane, controller)
+		}
+		for _, forbidden := range []string{"t33n-software", "pull_request", "\n  push:", "schedule:"} {
+			if strings.Contains(content, forbidden) {
+				t.Fatalf("lane workflow %s contains %q; lanes are organization-agnostic and dispatch-only", lane, forbidden)
+			}
+		}
+		for _, line := range strings.Split(content, "\n") {
+			if !strings.Contains(line, "uses:") {
+				continue
+			}
+			parts := strings.SplitN(line, "@", 2)
+			if len(parts) != 2 {
+				t.Fatalf("lane workflow %s carries an unpinned action reference %q", lane, line)
+			}
+			reference := strings.Fields(strings.TrimSpace(parts[1]))[0]
+			if len(reference) != 40 || !isHex(reference) {
+				t.Fatalf("lane workflow %s action %q is not pinned to a full commit SHA", lane, line)
+			}
+		}
+	}
+}
+
+func isHex(value string) bool {
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func TestOrganizationRulesetAdoptionHasNoLocalLegacyDefinitions(t *testing.T) {
 	if _, err := os.Stat(repositoryPath("docs", "hosting-platforms")); !os.IsNotExist(err) {
 		t.Fatalf("legacy ruleset location must not exist")
@@ -126,6 +181,11 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 	}
 	for _, path := range []string{
 		repositoryPath("internal", "dependency", "adapters", "inbound", "config"),
+		repositoryPath("internal", "dependency", "adapters", "outbound", "upstream"),
+		repositoryPath("internal", "dependency", "adapters", "outbound", "policy"),
+		repositoryPath("internal", "dependency", "adapters", "outbound", "scanner"),
+		repositoryPath("internal", "dependency", "adapters", "outbound", "artifactregistry"),
+		repositoryPath("internal", "dependency", "adapters", "outbound", "evidence"),
 		repositoryPath("internal", "dependency", "bootstrap"),
 		repositoryPath("test", "contract"),
 		repositoryPath("test", "integration"),
