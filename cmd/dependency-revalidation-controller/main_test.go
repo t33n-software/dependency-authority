@@ -9,18 +9,19 @@ import (
 )
 
 func TestMainRunsRevalidationController(t *testing.T) {
-	originalExit, originalRun, originalLookup := exitProcess, run, lookupEnv
+	originalExit, originalRun, originalLookup, originalBuild := exitProcess, run, lookupEnv, buildPorts
 	t.Cleanup(func() {
 		exitProcess = originalExit
 		run = originalRun
 		lookupEnv = originalLookup
+		buildPorts = originalBuild
 	})
 
 	exitCode := -1
 	exitProcess = func(code int) { exitCode = code }
-	run = func(ctx context.Context, lookup func(string) string, _ bootstrap.Ports, _ io.Writer, _ io.Writer) int {
-		if ctx == nil || lookup == nil {
-			t.Error("run() received nil context or lookup")
+	run = func(ctx context.Context, lookup func(string) string, build bootstrap.PortsBuilder, _ io.Writer, _ io.Writer) int {
+		if ctx == nil || lookup == nil || build == nil {
+			t.Error("run() received nil context, lookup, or ports builder")
 		}
 		return 23
 	}

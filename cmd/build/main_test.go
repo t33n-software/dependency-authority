@@ -193,6 +193,7 @@ func TestRunSuccessExecutesEveryGate(t *testing.T) {
 		"go vet ./...",
 		"go tool -modfile tools/go.mod govulncheck ./...",
 		"go test -mod=readonly ./internal/dependency/adapters/inbound/config -run=^$ -fuzz=FuzzFromEnv -fuzztime=50000x -parallel=1",
+		"go test -mod=readonly ./internal/dependency/adapters/inbound/config -run=^$ -fuzz=FuzzBindingsFromEnv -fuzztime=50000x -parallel=1",
 		"go tool -modfile tools/go.mod lefthook validate",
 	} {
 		if !strings.Contains(joined, required) {
@@ -240,6 +241,7 @@ func TestRunSuccessOrdersSecurityAndFuzzGates(t *testing.T) {
 		"go vet ./...",
 		"go tool -modfile tools/go.mod govulncheck ./...",
 		"go test -mod=readonly ./internal/dependency/adapters/inbound/config -run=^$ -fuzz=FuzzFromEnv -fuzztime=50000x -parallel=1",
+		"go test -mod=readonly ./internal/dependency/adapters/inbound/config -run=^$ -fuzz=FuzzBindingsFromEnv -fuzztime=50000x -parallel=1",
 		"go tool -modfile tools/go.mod lefthook validate",
 		"go build -mod=readonly -trimpath -o " + linuxBuildDirectory + "/dependency-intake-controller ./cmd/dependency-intake-controller",
 	}

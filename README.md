@@ -27,7 +27,12 @@ The core never contains:
 
 - concrete organization or tenant values;
 - credentials, tokens, private keys, or authorization headers;
-- cloud adapter implementations or runtime bindings.
+- provider SDK or adapter imports in the domain and application packages.
+
+The outbound adapter implementations live in this repository under
+`internal/dependency/adapters/outbound/` (ADR-0002); they bind concrete
+trust-zone endpoints through the lane environment and never through source
+constants.
 
 ## Lanes and trust zones
 
@@ -44,9 +49,60 @@ Each controller binds `DEPENDENCY_AUTHORITY_ZONE` and
 zone binding, and wires its lane service through the ports in
 `internal/dependency/bootstrap`. Binding fails closed: a controller with
 unbound ports never executes its lane. The outbound adapter implementations
-live in this repository under `internal/dependency/adapters/outbound/` and
-arrive with the trust-zone lane enablement (ADR-0002); the domain and
-application core never imports provider SDKs or adapter code.
+live in this repository under `internal/dependency/adapters/outbound/`
+(ADR-0002); the domain and application core never imports provider SDKs or
+adapter code.
+
+## Outbound adapters
+
+The trust-zone adapters under `internal/dependency/adapters/outbound/`
+implement the consumer-defined ports:
+
+- `upstream`: the Go module proxy digest client of the intake boundary
+  (`intake.Upstream`), with GOPROXY `!`-escaping, TLS-only endpoints, and no
+  public-registry or VCS fallback;
+- `policy`: the pinned `dependency-policy/v1` bundle loader
+  (`admission.Policies`), strictly decoded and fail-closed on any schema,
+  ecosystem, or revocation-invariant deviation;
+- `scanner`: the offline OSV-Scanner adapter (`admission.Scanner`) with the
+  snapshot database, CVSS v3 base scoring, and a conservative maximum score
+  for vulnerabilities without a computable vector;
+- `artifactregistry`: the append-only candidate records store
+  (`Candidates`), the approved-zone publisher with the dirhash
+  content-identity proof (`promotion.ApprovedRegistry`), and the
+  package-scoped download-rule revocation gate (`revocation.DownloadGate`);
+- `evidence`: the append-only evidence reference index
+  (`admission.EvidenceStore`, `revocation.EvidenceRecorder`).
+
+The adapters bind through the validated lane environment:
+
+| Variable | Binding |
+|---|---|
+| `DEPENDENCY_AUTHORITY_UPSTREAM_ENDPOINT` | Go proxy endpoint of the intake repository |
+| `DEPENDENCY_AUTHORITY_APPROVED_ENDPOINT` | Go proxy endpoint of the approved repository |
+| `DEPENDENCY_AUTHORITY_ARTIFACT_API` | Artifact Registry API endpoint |
+| `DEPENDENCY_AUTHORITY_EVIDENCE_REPOSITORY` | evidence-zone generic repository resource |
+| `DEPENDENCY_AUTHORITY_APPROVED_REPOSITORY` | approved-zone repository resource |
+| `DEPENDENCY_AUTHORITY_POLICY_BUNDLE` | pinned policy bundle path |
+| `DEPENDENCY_AUTHORITY_SCANNER_TOOL` | pinned scanner tool path |
+| `DEPENDENCY_AUTHORITY_SCANNER_DATABASE` | scanner database snapshot directory |
+| `DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT` | candidate materialization root |
+| `DEPENDENCY_AUTHORITY_ACCESS_TOKEN` | short-lived lane token (process memory only, never logged) |
+
+An adapter binds only when its complete environment contract is present; a
+lane requiring an unbound adapter fails closed at bind time.
+
+## Lane workflows
+
+Seven dispatch-only workflows under `.github/workflows/` run the lanes under
+the seven protected `dep-*` environments (ADR-0002): `dep-intake-fetch`,
+`dep-admission`, `dep-promotion`, `dep-revalidation`, `dep-revocation`,
+`dep-evidence-write`, and `dep-evidence-audit`. Each workflow federates its
+environment-scoped workload identity, builds the lane controller, and runs
+the binding; the intake lane additionally probes the controlled intake
+boundary with a bounded read. The workflows carry no organization value —
+every concrete binding arrives through environment variables set on the
+protected environments.
 
 ## Quality gates
 
@@ -62,9 +118,10 @@ Every executable Go package must reach exactly 100.0% statement coverage.
 `cmd/build` is the full source-level gate: formatting, module checksums and
 metadata, the pinned build tool module, lint (staticcheck), unit tests, exact
 100% statement coverage, race detector, static analysis, fail-closed
-vulnerability analysis (govulncheck), a fuzz smoke lane for the inbound
-configuration boundary, Lefthook configuration validation, Linux/AMD64 build
-of all five lane controllers, and module provenance.
+vulnerability analysis (govulncheck), fuzz smoke lanes for the inbound
+configuration and adapter bindings boundaries, Lefthook configuration
+validation, Linux/AMD64 build of all five lane controllers, and module
+provenance.
 
 The Go toolchain is pinned exactly (`toolchain go1.26.6`,
 `GOTOOLCHAIN=local`); no lane downloads a toolchain at build time. CI re-runs
@@ -79,7 +136,7 @@ without source changes.
   quarantine, revocation, and evidence domain models.
 - `internal/dependency/application/` contains the five lane use cases.
 - `internal/dependency/adapters/inbound/` contains the environment
-  configuration adapter; `internal/dependency/adapters/outbound/` receives
+  configuration adapter; `internal/dependency/adapters/outbound/` contains
   the trust-zone adapter implementations (ADR-0002).
 - `internal/dependency/bootstrap/` wires the controllers.
 - `internal/packaging/` contains the same-package workflow contract tests.

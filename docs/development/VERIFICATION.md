@@ -20,9 +20,9 @@ go run -mod=readonly ./cmd/build
 module metadata, build tool download, build tool checksums, build tool
 metadata, lint (staticcheck), unit tests, exact 100% statement coverage,
 race detector, static analysis, fail-closed vulnerability analysis
-(govulncheck), a fuzz smoke lane for the inbound configuration boundary,
-Lefthook configuration validation, Linux/AMD64 build of all five lane
-controllers, and module provenance.
+(govulncheck), fuzz smoke lanes for the inbound configuration and adapter
+bindings boundaries, Lefthook configuration validation, Linux/AMD64 build of
+all five lane controllers, and module provenance.
 
 ## Build tooling
 
@@ -47,6 +47,16 @@ invariants, branches, state transitions, errors, and cleanup paths.
 `test/contract/` complements them with exported-API contract tests.
 Integration tests for the trust-zone adapters land in `test/integration/`
 with the tickets that deliver those adapters.
+
+## Lane workflows
+
+The seven dispatch-only lane workflows under `.github/workflows/` run under
+the protected `dep-*` environments and are verified by the packaging contract
+tests: environment binding, `id-token: write`, full-length SHA-pinned
+actions, no organization values, and no push/pull_request/schedule triggers.
+Their live execution is proven on the protected environments after the
+hosting-platform GUI creates and protects them; the intake lane's boundary
+probe is the empirical perimeter intake check (ADR-0002).
 
 ## CI gates
 

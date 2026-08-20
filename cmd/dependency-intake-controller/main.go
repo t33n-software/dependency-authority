@@ -14,10 +14,11 @@ var (
 	exitProcess = os.Exit
 	run         = bootstrap.RunIntake
 	lookupEnv   = os.Getenv
+	buildPorts  = bootstrap.PortsFromEnv
 )
 
 func main() {
 	runtimeContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	exitProcess(run(runtimeContext, lookupEnv, bootstrap.Ports{}, os.Stdout, os.Stderr))
+	exitProcess(run(runtimeContext, lookupEnv, buildPorts, os.Stdout, os.Stderr))
 }

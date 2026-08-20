@@ -5,10 +5,14 @@ on:
     branches:
       - main
       - develop
+      - "release/**"
+      - "support/**"
   pull_request:
     branches:
       - main
       - develop
+      - "release/**"
+      - "support/**"
   schedule:
     - cron: "17 4 * * 0"
   workflow_dispatch:
@@ -20,7 +24,6 @@ permissions:
 
 env:
   GOTOOLCHAIN: local
-  GOFLAGS: -mod=readonly
   GOVCS: "*:off"
 
 concurrency:
@@ -59,10 +62,16 @@ jobs:
           build-mode: manual
 
       - name: Verify Go modules
+        env:
+          GOFLAGS: -mod=readonly
         run: go mod verify
 
       - name: Build Go for analysis
-        run: go build -mod=readonly ./...
+        env:
+          GOFLAGS: -mod=readonly
+        run: go build ./...
 
       - name: Analyze with CodeQL
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        env:
+          GOFLAGS: -mod=readonly
