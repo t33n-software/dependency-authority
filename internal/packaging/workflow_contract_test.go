@@ -101,6 +101,48 @@ func isHex(value string) bool {
 	return true
 }
 
+func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
+	lanes := map[string][]string{
+		"dep-intake-fetch": {
+			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
+		},
+		"dep-admission": {
+			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
+			"DEPENDENCY_AUTHORITY_LANE_IDENTITY", "DEPENDENCY_AUTHORITY_SCANNER_IDENTITY",
+			"DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY", "DEPENDENCY_AUTHORITY_APPROVAL_TTL",
+		},
+		"dep-promotion": {
+			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
+		},
+		"dep-revalidation": {
+			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
+			"DEPENDENCY_AUTHORITY_SCANNER_IDENTITY", "DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY",
+		},
+		"dep-revocation": {
+			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
+			"DEPENDENCY_AUTHORITY_LANE_IDENTITY", "DEPENDENCY_AUTHORITY_REVOCATION_REASON",
+		},
+	}
+	for lane, required := range lanes {
+		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
+		for _, needle := range []string{"inputs:", "module:", "version:", "${{ inputs.module }}", "${{ inputs.version }}"} {
+			if !strings.Contains(content, needle) {
+				t.Fatalf("lane workflow %s does not declare the dispatch input %q", lane, needle)
+			}
+		}
+		for _, binding := range required {
+			if !strings.Contains(content, binding+":") {
+				t.Fatalf("lane workflow %s does not bind %q", lane, binding)
+			}
+		}
+	}
+
+	revocation := readRepositoryFile(t, ".github/workflows/dep-revocation.yml")
+	if !strings.Contains(revocation, "reason:") || !strings.Contains(revocation, "${{ inputs.reason }}") {
+		t.Fatal("the revocation lane does not bind the revocation reason input")
+	}
+}
+
 func TestOrganizationRulesetAdoptionHasNoLocalLegacyDefinitions(t *testing.T) {
 	if _, err := os.Stat(repositoryPath("docs", "hosting-platforms")); !os.IsNotExist(err) {
 		t.Fatalf("legacy ruleset location must not exist")

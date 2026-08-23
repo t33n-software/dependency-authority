@@ -97,12 +97,22 @@ lane requiring an unbound adapter fails closed at bind time.
 Seven dispatch-only workflows under `.github/workflows/` run the lanes under
 the seven protected `dep-*` environments (ADR-0002): `dep-intake-fetch`,
 `dep-admission`, `dep-promotion`, `dep-revalidation`, `dep-revocation`,
-`dep-evidence-write`, and `dep-evidence-audit`. Each workflow federates its
-environment-scoped workload identity, builds the lane controller, and runs
-the binding; the intake lane additionally probes the controlled intake
-boundary with a bounded read. The workflows carry no organization value —
-every concrete binding arrives through environment variables set on the
-protected environments.
+`dep-evidence-write`, and `dep-evidence-audit`. Each controller lane takes
+the candidate identity as required dispatch inputs (`module`, `version`; the
+revocation lane additionally takes `reason`), federates its
+environment-scoped workload identity, builds the lane controller, and
+executes the lane use case with the adapters bound from the environment: the
+intake lane registers the pending candidate from the controlled upstream
+digest, the admission lane scans the candidate, records the scan and decision
+evidence with the pinned tool and policy identities, and records the
+automatic time-bounded approval on a policy pass, the promotion lane promotes
+under the newest recorded, still valid approval, the revalidation lane
+re-evaluates approved candidates and records the fresh scan and decision
+evidence, and the revocation lane blocks downloads at the approved boundary
+and records the revocation evidence. The intake lane additionally probes the
+controlled intake boundary with a bounded read. The workflows carry no
+organization value — every concrete binding arrives through environment
+variables set on the protected environments.
 
 ## Quality gates
 

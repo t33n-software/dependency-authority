@@ -2,6 +2,15 @@ name: dep-intake-fetch lane
 
 on:
   workflow_dispatch:
+    inputs:
+      module:
+        description: "Module path of the candidate (for example github.com/google/go-cmp)."
+        required: true
+        type: string
+      version:
+        description: "Version of the candidate (for example v0.7.0)."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -57,13 +66,15 @@ jobs:
       - name: Build the intake controller
         run: go build -mod=readonly -trimpath -o .build/dependency-intake-controller ./cmd/dependency-intake-controller
 
-      - name: Run the intake lane binding
+      - name: Run the intake lane
         env:
           DEPENDENCY_AUTHORITY_ZONE: intake
           DEPENDENCY_AUTHORITY_ECOSYSTEM: go
           DEPENDENCY_AUTHORITY_UPSTREAM_ENDPOINT: ${{ vars.DEP_UPSTREAM_ENDPOINT }}
           DEPENDENCY_AUTHORITY_ARTIFACT_API: https://artifactregistry.googleapis.com
           DEPENDENCY_AUTHORITY_EVIDENCE_REPOSITORY: ${{ vars.DEP_EVIDENCE_REPOSITORY }}
+          DEPENDENCY_AUTHORITY_MODULE: ${{ inputs.module }}
+          DEPENDENCY_AUTHORITY_VERSION: ${{ inputs.version }}
           DEPENDENCY_AUTHORITY_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: ./.build/dependency-intake-controller
 

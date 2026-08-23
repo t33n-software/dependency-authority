@@ -18,8 +18,8 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 )
 
-// schemaID is the exact schema version pin this adapter consumes.
-const schemaID = "dependency-policy/v1"
+// SchemaID is the exact schema version pin this adapter consumes.
+const SchemaID = "dependency-policy/v1"
 
 // Reader loads the bundle content. os.ReadFile satisfies it in production.
 type Reader func(path string) ([]byte, error)
@@ -77,8 +77,8 @@ func (b Bundle) Policy(_ context.Context, ecosystem candidate.Ecosystem) (admiss
 	if err != nil {
 		return admission.Policy{}, fmt.Errorf("decode policy bundle: %w", err)
 	}
-	if document.Schema != schemaID {
-		return admission.Policy{}, fmt.Errorf("policy bundle schema %q does not match the pinned %q", document.Schema, schemaID)
+	if document.Schema != SchemaID {
+		return admission.Policy{}, fmt.Errorf("policy bundle schema %q does not match the pinned %q", document.Schema, SchemaID)
 	}
 	if document.Ecosystem != string(ecosystem) {
 		return admission.Policy{}, fmt.Errorf("policy bundle ecosystem %q does not match the requested %q", document.Ecosystem, ecosystem)
