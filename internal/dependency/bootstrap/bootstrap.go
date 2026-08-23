@@ -1,8 +1,8 @@
-// Package bootstrap wires the dependency authority lane controllers.
-//
-// The controllers bind their outbound ports only when the trust-zone
-// infrastructure provides real adapters. Until then, binding fails closed:
-// a controller with unbound ports never executes its lane.
+// Package bootstrap wires the dependency authority lane controllers and runs
+// their execution contract: each controller binds its outbound ports from the
+// lane environment, loads its validated operation inputs, and executes its
+// lane use case with the bound adapters. A controller with unbound ports or
+// invalid inputs fails closed and never executes its lane partially.
 package bootstrap
 
 import (
@@ -42,6 +42,7 @@ type Ports struct {
 	Registry      promotion.ApprovedRegistry
 	Gate          revocation.DownloadGate
 	Recorder      revocation.EvidenceRecorder
+	Journal       EvidenceJournal
 	Now           func() time.Time
 }
 
@@ -70,7 +71,7 @@ func RunRevocation(ctx context.Context, lookup func(string) string, buildPorts P
 	return run(ctx, OperationRevocation, lookup, buildPorts, stdout, stderr)
 }
 
-func run(_ context.Context, operation Operation, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+func run(ctx context.Context, operation Operation, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
 	controllerConfig, err := config.FromEnv(lookup)
 	if err != nil {
 		fmt.Fprintln(stderr, "load controller configuration:", err)
@@ -85,12 +86,20 @@ func run(_ context.Context, operation Operation, lookup func(string) string, bui
 		fmt.Fprintf(stderr, "wire dependency-%s-controller: %v\n", operation, err)
 		return 2
 	}
-	if err := bind(operation, ports); err != nil {
+	service, err := bind(operation, ports)
+	if err != nil {
 		fmt.Fprintf(stderr, "bind dependency-%s-controller: %v\n", operation, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "dependency-%s-controller configured for zone %s and ecosystem %s\n",
-		operation, controllerConfig.Zone(), controllerConfig.Ecosystem())
+	operationInput, err := config.OperationFromEnv(lookup, operationFields(operation)...)
+	if err != nil {
+		fmt.Fprintln(stderr, "load operation inputs:", err)
+		return 2
+	}
+	if err := execute(ctx, operation, service, ports, controllerConfig, operationInput, lookup, stdout); err != nil {
+		fmt.Fprintf(stderr, "execute dependency-%s-controller: %v\n", operation, err)
+		return 1
+	}
 	return 0
 }
 
@@ -121,24 +130,19 @@ func zoneFor(operation Operation) (config.Zone, error) {
 
 // bind constructs the lane service and fails closed when a required port is
 // unbound.
-func bind(operation Operation, ports Ports) error {
+func bind(operation Operation, ports Ports) (any, error) {
 	switch operation {
 	case OperationIntake:
-		_, err := intake.NewService(ports.Upstream, ports.Candidates)
-		return err
+		return intake.NewService(ports.Upstream, ports.Candidates)
 	case OperationAdmission:
-		_, err := admission.NewService(ports.Policies, ports.Candidates, ports.Scanner, ports.EvidenceStore)
-		return err
+		return admission.NewService(ports.Policies, ports.Candidates, ports.Scanner, ports.EvidenceStore)
 	case OperationPromotion:
-		_, err := promotion.NewService(ports.Candidates, ports.Policies, ports.EvidenceStore, ports.Registry, ports.Now)
-		return err
+		return promotion.NewService(ports.Candidates, ports.Policies, ports.EvidenceStore, ports.Registry, ports.Now)
 	case OperationRevalidation:
-		_, err := revalidation.NewService(ports.Candidates, ports.Policies, ports.Scanner, ports.EvidenceStore)
-		return err
+		return revalidation.NewService(ports.Candidates, ports.Policies, ports.Scanner, ports.EvidenceStore)
 	case OperationRevocation:
-		_, err := revocation.NewService(ports.Candidates, ports.Gate, ports.Recorder, ports.Now)
-		return err
+		return revocation.NewService(ports.Candidates, ports.Gate, ports.Recorder, ports.Now)
 	default:
-		return fmt.Errorf("unknown operation %q", operation)
+		return nil, fmt.Errorf("unknown operation %q", operation)
 	}
 }

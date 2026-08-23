@@ -81,6 +81,7 @@ func PortsFromEnv(lookup func(string) string) (Ports, error) {
 			store, _ := evidence.NewStore(bindings.ArtifactAPI(), bindings.EvidenceRepository(), token, httpClient)
 			ports.EvidenceStore = store
 			ports.Recorder = store
+			ports.Journal = store
 		}
 		if bindings.ApprovedRepository() != "" {
 			gate, err := artifactregistry.NewGate(client, bindings.ApprovedRepository())
