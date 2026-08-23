@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "toolchain": { "goVersion": "1.26.6" },
   "defaults": {
     "includeFamilies": [
       "feature",
@@ -23,5 +24,41 @@
       ],
       "timeout": "15m"
     }
-  ]
+  ],
+  "project": {
+    "binaries": [
+      {
+        "package": "./cmd/dependency-intake-controller",
+        "smoke": ["--version"]
+      },
+      {
+        "package": "./cmd/dependency-admission-controller",
+        "smoke": ["--version"]
+      },
+      {
+        "package": "./cmd/dependency-promotion-controller",
+        "smoke": ["--version"]
+      },
+      {
+        "package": "./cmd/dependency-revalidation-controller",
+        "smoke": ["--version"]
+      },
+      {
+        "package": "./cmd/dependency-revocation-controller",
+        "smoke": ["--version"]
+      }
+    ],
+    "fuzz": [
+      {
+        "package": "./internal/dependency/adapters/inbound/config",
+        "target": "FuzzFromEnv",
+        "time": "50000x"
+      },
+      {
+        "package": "./internal/dependency/adapters/inbound/config",
+        "target": "FuzzBindingsFromEnv",
+        "time": "50000x"
+      }
+    ]
+  }
 }
