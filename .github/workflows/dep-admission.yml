@@ -2,6 +2,15 @@ name: dep-admission lane
 
 on:
   workflow_dispatch:
+    inputs:
+      module:
+        description: "Module path of the candidate (for example github.com/google/go-cmp)."
+        required: true
+        type: string
+      version:
+        description: "Version of the candidate (for example v0.7.0)."
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -57,7 +66,7 @@ jobs:
       - name: Build the admission controller
         run: go build -mod=readonly -trimpath -o .build/dependency-admission-controller ./cmd/dependency-admission-controller
 
-      - name: Run the admission lane binding
+      - name: Run the admission lane
         env:
           DEPENDENCY_AUTHORITY_ZONE: control
           DEPENDENCY_AUTHORITY_ECOSYSTEM: go
@@ -67,5 +76,11 @@ jobs:
           DEPENDENCY_AUTHORITY_SCANNER_TOOL: .build/osv-scanner
           DEPENDENCY_AUTHORITY_SCANNER_DATABASE: .build/osv-db
           DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT: .build/content
+          DEPENDENCY_AUTHORITY_MODULE: ${{ inputs.module }}
+          DEPENDENCY_AUTHORITY_VERSION: ${{ inputs.version }}
+          DEPENDENCY_AUTHORITY_LANE_IDENTITY: ${{ vars.DEP_ADMISSION_CONTROLLER_SERVICE_ACCOUNT }}
+          DEPENDENCY_AUTHORITY_SCANNER_IDENTITY: ${{ vars.DEP_SCANNER_IDENTITY }}
+          DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY: ${{ vars.DEP_SCANNER_DATABASE_IDENTITY }}
+          DEPENDENCY_AUTHORITY_APPROVAL_TTL: "72h"
           DEPENDENCY_AUTHORITY_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: ./.build/dependency-admission-controller
