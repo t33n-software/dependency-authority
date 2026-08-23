@@ -20,9 +20,9 @@ go run -mod=readonly ./cmd/build
 module metadata, build tool download, build tool checksums, build tool
 metadata, lint (staticcheck), unit tests, exact 100% statement coverage,
 race detector, static analysis, fail-closed vulnerability analysis
-(govulncheck), fuzz smoke lanes for the inbound configuration and adapter
-bindings boundaries, Lefthook configuration validation, Linux/AMD64 build of
-all five lane controllers, and module provenance.
+(govulncheck), fuzz smoke lanes for the inbound configuration, adapter
+bindings, and operation inputs boundaries, Lefthook configuration validation,
+Linux/AMD64 build of all five lane controllers, and module provenance.
 
 ## Build tooling
 
@@ -53,10 +53,23 @@ with the tickets that deliver those adapters.
 The seven dispatch-only lane workflows under `.github/workflows/` run under
 the protected `dep-*` environments and are verified by the packaging contract
 tests: environment binding, `id-token: write`, full-length SHA-pinned
-actions, no organization values, and no push/pull_request/schedule triggers.
-Their live execution is proven on the protected environments after the
-hosting-platform GUI creates and protects them; the intake lane's boundary
-probe is the empirical perimeter intake check (ADR-0002).
+actions, no organization values, no push/pull_request/schedule triggers, and
+the bound operation inputs. The five controller lanes take the candidate
+identity as required dispatch inputs (`module`, `version`; the revocation
+lane additionally takes `reason`) and execute their use case: the intake lane
+registers the pending candidate from the controlled upstream digest; the
+admission lane scans the candidate, records the scan and decision evidence
+with the pinned tool and policy identities, and records the automatic
+time-bounded approval on a policy pass (ADR-0002); the promotion lane
+promotes under the newest recorded, still valid approval; the revalidation
+lane re-evaluates the approved candidate and records the fresh scan and
+decision evidence; the revocation lane blocks downloads at the approved
+boundary and records the revocation evidence. A lane without its complete
+environment contract fails closed before any mutation; the scanner tool, the
+scanner database snapshot, and the policy bundle pins land with their bound
+identities, and a lane dispatched without them fails closed at execution. The
+intake lane's boundary probe is the empirical perimeter intake check
+(ADR-0002).
 
 ## CI gates
 
