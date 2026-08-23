@@ -58,6 +58,11 @@
         "package": "./internal/dependency/adapters/inbound/config",
         "target": "FuzzBindingsFromEnv",
         "time": "50000x"
+      },
+      {
+        "package": "./internal/dependency/adapters/inbound/config",
+        "target": "FuzzOperationFromEnv",
+        "time": "50000x"
       }
     ]
   }

@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 )
@@ -81,6 +82,52 @@ func FuzzBindingsFromEnv(f *testing.F) {
 		}
 		if bindings.AccessToken() != token {
 			t.Fatalf("AccessToken() = %q, want the untrimmed input", bindings.AccessToken())
+		}
+	})
+}
+
+func FuzzOperationFromEnv(f *testing.F) {
+	for _, seed := range [][3]string{
+		{"github.com/google/go-cmp", "v0.7.0", "72h"},
+		{"", "", ""},
+		{"  ", "  ", "  "},
+		{"mod", "v1", "soon"},
+		{"mod", "v1", "-1h"},
+		{"mod", "v1", "0s"},
+		{"\x00", "\x00", "\x00"},
+	} {
+		f.Add(seed[0], seed[1], seed[2])
+	}
+	f.Fuzz(func(t *testing.T, module, version, ttl string) {
+		lookup := func(name string) string {
+			switch name {
+			case EnvModule:
+				return module
+			case EnvVersion:
+				return version
+			case EnvApprovalTTL:
+				return ttl
+			default:
+				return ""
+			}
+		}
+		operation, err := OperationFromEnv(lookup, FieldModule, FieldVersion, FieldApprovalTTL)
+		trimmedTTL := strings.TrimSpace(ttl)
+		parsed, parseErr := time.ParseDuration(trimmedTTL)
+		valid := strings.TrimSpace(module) != "" && strings.TrimSpace(version) != "" && trimmedTTL != "" && parseErr == nil && parsed > 0
+		if valid && err != nil {
+			t.Fatalf("OperationFromEnv(%q, %q, %q) error = %v, want success", module, version, ttl, err)
+		}
+		if !valid && err == nil {
+			t.Fatalf("OperationFromEnv(%q, %q, %q) succeeded, want error", module, version, ttl)
+		}
+		if err == nil {
+			if operation.Module() != strings.TrimSpace(module) || operation.Version() != strings.TrimSpace(version) {
+				t.Fatalf("OperationFromEnv() bound %q %q, want the trimmed inputs", operation.Module(), operation.Version())
+			}
+			if operation.ApprovalTTL() != parsed {
+				t.Fatalf("ApprovalTTL() = %v, want %v", operation.ApprovalTTL(), parsed)
+			}
 		}
 	})
 }
