@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -57,6 +58,36 @@ func (s Store) Record(ctx context.Context, subject candidate.Candidate, referenc
 	content, _ := json.Marshal(document)
 	filename := hex.EncodeToString(sha256Sum(content)) + ".json"
 	return s.transport.upload(ctx, s.repository, indexPackage(subject), recordVersion, filename, content)
+}
+
+// Put publishes the evidence payload content-addressed into the bound
+// repository and returns its digest-bound reference. Payloads live in the
+// candidate's payload package, separate from the reference index, so the
+// index listing never decodes payload documents. Re-publishing identical
+// content is an idempotent success.
+func (s Store) Put(ctx context.Context, subject candidate.Candidate, evidenceType evidence.Type, issuer string, payload []byte, issuedAt time.Time, expiresAt *time.Time) (evidence.Reference, error) {
+	if len(payload) == 0 {
+		return evidence.Reference{}, errors.New("evidence payload must not be empty")
+	}
+	sum := sha256.Sum256(payload)
+	filename := hex.EncodeToString(sum[:]) + ".json"
+	packageID := payloadPackageIdentity(subject.Ecosystem(), subject.Name(), subject.Version())
+	if err := s.transport.upload(ctx, s.repository, packageID, recordVersion, filename, payload); err != nil {
+		return evidence.Reference{}, err
+	}
+	locator := "evidence://" + s.repository + "/" + packageID + "/" + recordVersion + "/" + filename
+	reference, err := evidence.NewReference(evidenceType, locator, "sha256:"+hex.EncodeToString(sum[:]), issuer, issuedAt, expiresAt)
+	if err != nil {
+		return evidence.Reference{}, err
+	}
+	return reference, nil
+}
+
+// payloadPackageIdentity derives the deterministic, alphabet-safe package ID
+// of one candidate's evidence payloads.
+func payloadPackageIdentity(ecosystem candidate.Ecosystem, name string, version string) string {
+	sum := sha256.Sum256([]byte(string(ecosystem) + "\n" + name + "\n" + version))
+	return "evidence-payloads-" + hex.EncodeToString(sum[:])[:24]
 }
 
 // Evidence loads the recorded evidence references of the candidate in

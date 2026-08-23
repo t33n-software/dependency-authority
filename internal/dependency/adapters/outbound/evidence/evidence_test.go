@@ -2,6 +2,8 @@ package evidence
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -426,5 +428,108 @@ func TestTransportListFailures(t *testing.T) {
 	}))
 	if _, err := store.transport.list(context.Background(), "projects/p/locations/l/repositories/r", "pkg", "v1"); err == nil {
 		t.Fatal("list() error = nil, want transport error")
+	}
+}
+
+func TestPutRejectsAnEmptyPayload(t *testing.T) {
+	store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return okResponse(`{}`), nil
+	}))
+	if _, err := store.Put(context.Background(), testCandidate(t), evidence.TypeScan, "issuer", nil, evidenceTime, nil); err == nil {
+		t.Fatal("Put() error = nil, want empty payload error")
+	}
+}
+
+func TestPutPublishesThePayloadAndBindsTheReference(t *testing.T) {
+	var gotURL, gotBody string
+	store := newTestStore(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+		gotURL = req.URL.String()
+		content, _ := io.ReadAll(req.Body)
+		gotBody = string(content)
+		return okResponse(`{"operation": {"name": "operations/1"}}`), nil
+	}))
+
+	payload := []byte(`{"schema":"dependency-authority/scan-evidence/v1"}`)
+	expiry := evidenceTime.Add(time.Hour)
+	reference, err := store.Put(context.Background(), testCandidate(t), evidence.TypeScan, "osv-scanner 2.2.3", payload, evidenceTime, &expiry)
+	if err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+
+	sum := sha256.Sum256(payload)
+	wantDigest := "sha256:" + hex.EncodeToString(sum[:])
+	if reference.Digest() != wantDigest {
+		t.Fatalf("Put() digest = %q, want %q", reference.Digest(), wantDigest)
+	}
+	identitySum := sha256.Sum256([]byte("go\nexample.com/mod\nv1.0.0"))
+	wantPackage := "evidence-payloads-" + hex.EncodeToString(identitySum[:])[:24]
+	wantLocator := "evidence://projects/p/locations/l/repositories/r/" + wantPackage + "/v1/" + hex.EncodeToString(sum[:]) + ".json"
+	if reference.Reference() != wantLocator {
+		t.Fatalf("Put() locator = %q, want %q", reference.Reference(), wantLocator)
+	}
+	if reference.Type() != evidence.TypeScan || reference.Issuer() != "osv-scanner 2.2.3" {
+		t.Fatalf("Put() reference = %q %q", reference.Type(), reference.Issuer())
+	}
+	if !reference.IssuedAt().Equal(evidenceTime) {
+		t.Fatalf("Put() issued-at = %v", reference.IssuedAt())
+	}
+	if expiresAt, ok := reference.ExpiresAt(); !ok || !expiresAt.Equal(expiry) {
+		t.Fatalf("Put() expires-at = %v, %v", expiresAt, ok)
+	}
+	if !strings.Contains(gotURL, "/upload/v1/projects/p/locations/l/repositories/r/genericArtifacts:create") {
+		t.Fatalf("Put() upload URL = %q", gotURL)
+	}
+	if !strings.Contains(gotBody, "evidence-payloads-") || !strings.Contains(gotBody, string(payload)) {
+		t.Fatalf("Put() upload body misses the payload package or content: %q", gotBody)
+	}
+}
+
+func TestPutWithoutExpiryLeavesTheReferenceOpen(t *testing.T) {
+	store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return okResponse(`{}`), nil
+	}))
+	reference, err := store.Put(context.Background(), testCandidate(t), evidence.TypePolicy, "issuer", []byte(`{"ok":true}`), evidenceTime, nil)
+	if err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+	if _, ok := reference.ExpiresAt(); ok {
+		t.Fatal("Put() expires-at present, want an open reference")
+	}
+}
+
+func TestPutPropagatesUploadFailures(t *testing.T) {
+	store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("repository unavailable")
+	}))
+	if _, err := store.Put(context.Background(), testCandidate(t), evidence.TypeScan, "issuer", []byte(`{"ok":true}`), evidenceTime, nil); err == nil {
+		t.Fatal("Put() error = nil, want upload error")
+	}
+
+	store = newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{Status: "500 Internal Server Error", StatusCode: 500, Body: io.NopCloser(strings.NewReader(""))}, nil
+	}))
+	if _, err := store.Put(context.Background(), testCandidate(t), evidence.TypeScan, "issuer", []byte(`{"ok":true}`), evidenceTime, nil); err == nil {
+		t.Fatal("Put() error = nil, want status error")
+	}
+
+	store = newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{Status: "409 Conflict", StatusCode: 409, Body: io.NopCloser(strings.NewReader(""))}, nil
+	}))
+	if _, err := store.Put(context.Background(), testCandidate(t), evidence.TypeScan, "issuer", []byte(`{"ok":true}`), evidenceTime, nil); err != nil {
+		t.Fatalf("Put() error = %v, want idempotent success", err)
+	}
+}
+
+func TestPutPropagatesReferenceValidation(t *testing.T) {
+	store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return okResponse(`{}`), nil
+	}))
+	if _, err := store.Put(context.Background(), testCandidate(t), evidence.Type("bogus"), "issuer", []byte(`{"ok":true}`), evidenceTime, nil); err == nil {
+		t.Fatal("Put() error = nil, want unknown evidence type error")
+	}
+
+	expired := evidenceTime.Add(-time.Hour)
+	if _, err := store.Put(context.Background(), testCandidate(t), evidence.TypeScan, "issuer", []byte(`{"ok":true}`), evidenceTime, &expired); err == nil {
+		t.Fatal("Put() error = nil, want expiry ordering error")
 	}
 }
