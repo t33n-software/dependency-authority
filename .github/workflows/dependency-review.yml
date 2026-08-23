@@ -2,22 +2,13 @@ name: Dependency Review
 
 on:
   pull_request:
-    branches:
-      - main
-      - develop
-      - "release/**"
-      - "support/**"
+    branches: [main, develop, "release/**", "support/**"]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   dependency-review:
-    name: Dependency admission review
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Review dependency changes
-        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
-        with:
-          fail-on-severity: low
-          fail-on-scopes: runtime,development,unknown
+    name: Dependency review
+    permissions:
+      contents: read
+    uses: t33n-software/repository-governance/.github/workflows/reusable-dependency-review.yml@842c23028f0635a6478b727248033731693139a4
