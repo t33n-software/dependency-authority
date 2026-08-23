@@ -91,6 +91,38 @@ func TestRunRejectsArguments(t *testing.T) {
 	}
 }
 
+func TestRunPrintsTheToolVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	failRunner := func(context.Context, []string, string, ...string) ([]byte, error) {
+		t.Fatal("runner must not execute for the version flag")
+		return nil, nil
+	}
+	failFinder := func(string) ([]string, error) {
+		t.Fatal("finder must not execute for the version flag")
+		return nil, nil
+	}
+	failReader := func(string) ([]byte, error) {
+		t.Fatal("reader must not execute for the version flag")
+		return nil, nil
+	}
+	failFormatter := func([]byte) ([]byte, error) {
+		t.Fatal("formatter must not execute for the version flag")
+		return nil, nil
+	}
+	failCreator := func(string, os.FileMode) error {
+		t.Fatal("directory creator must not execute for the version flag")
+		return nil
+	}
+	code := run(context.Background(), []string{"--version"}, &stdout, &stderr,
+		failRunner, failFinder, failReader, failFormatter, failCreator)
+	if code != 0 {
+		t.Fatalf("run() = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "build devel") {
+		t.Fatalf("stdout = %q, want the tool version", stdout.String())
+	}
+}
+
 func TestRunWithNilContextUsesBackground(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(testNilContext(), nil, &stdout, &stderr,

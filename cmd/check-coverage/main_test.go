@@ -50,6 +50,21 @@ func TestRunRejectsArguments(t *testing.T) {
 	}
 }
 
+func TestRunPrintsTheToolVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	runner := func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("runner must not execute for the version flag")
+		return nil, nil
+	}
+	code := run(context.Background(), []string{"--version"}, &stdout, &stderr, runner)
+	if code != 0 {
+		t.Fatalf("run() = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "check-coverage devel") {
+		t.Fatalf("stdout = %q, want the tool version", stdout.String())
+	}
+}
+
 func TestRunWithNilContextUsesBackground(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	runner := func(context.Context, string, ...string) ([]byte, error) {

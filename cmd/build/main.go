@@ -50,6 +50,7 @@ var (
 	readSource         = os.ReadFile
 	formatSource       = format.Source
 	createDirectory    = os.MkdirAll
+	version            = "devel"
 )
 
 func main() {
@@ -77,6 +78,10 @@ func run(
 	format sourceFormatter,
 	makeDirectory directoryCreator,
 ) int {
+	if len(arguments) == 1 && arguments[0] == "--version" {
+		fmt.Fprintf(stdout, "build %s\n", version)
+		return 0
+	}
 	if len(arguments) != 0 {
 		fmt.Fprintln(stderr, "usage: build")
 		return 2
