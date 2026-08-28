@@ -337,6 +337,10 @@ func TestModuleIdentityAndQualityContract(t *testing.T) {
 
 	quality := readRepositoryFile(t, "git-governance.quality.json")
 	for _, required := range []string{
+		`"schemaVersion": 4`,
+		`"language": "go"`,
+		`"version": "1.26.6"`,
+		`"extends": []`,
 		"dependency-authority-source-quality",
 		"./cmd/build",
 	} {
