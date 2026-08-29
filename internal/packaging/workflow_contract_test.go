@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -342,10 +343,51 @@ func TestModuleIdentityAndQualityContract(t *testing.T) {
 		`"version": "1.26.6"`,
 		`"extends": []`,
 		"dependency-authority-source-quality",
-		"./cmd/build",
 	} {
 		if !strings.Contains(quality, required) {
 			t.Fatalf("git-governance.quality.json does not contain %q", required)
+		}
+	}
+
+	var qualityConfig struct {
+		Gates []struct {
+			Name    string   `json:"name"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"gates"`
+		Project struct {
+			Binaries []struct {
+				Package string `json:"package"`
+			} `json:"binaries"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal([]byte(quality), &qualityConfig); err != nil {
+		t.Fatalf("git-governance.quality.json is not valid JSON: %v", err)
+	}
+	if len(qualityConfig.Gates) != 1 {
+		t.Fatalf("git-governance.quality.json carries %d gates, want exactly the canonical gate chain", len(qualityConfig.Gates))
+	}
+	if qualityConfig.Gates[0].Name != "dependency-authority-source-quality" ||
+		qualityConfig.Gates[0].Command != "go" ||
+		!slices.Equal(qualityConfig.Gates[0].Args, []string{"tool", "-modfile", "tools/go.mod", "quality-gate"}) {
+		t.Fatal("the gate does not invoke the canonical gate chain through the tooling module pin")
+	}
+	if len(qualityConfig.Project.Binaries) != 5 {
+		t.Fatalf("the project binaries must carry the five lane controllers, got %d", len(qualityConfig.Project.Binaries))
+	}
+	for _, binary := range qualityConfig.Project.Binaries {
+		if !strings.HasPrefix(binary.Package, "./cmd/dependency-") {
+			t.Fatalf("unexpected project binary %q", binary.Package)
+		}
+	}
+	for _, forbidden := range []string{`"./cmd/build"`, `"./cmd/check-coverage"`, `"defaults"`} {
+		if strings.Contains(quality, forbidden) {
+			t.Fatalf("git-governance.quality.json still contains %s", forbidden)
+		}
+	}
+	for _, chainCopy := range []string{"cmd/build", "cmd/check-coverage"} {
+		if _, err := os.Stat(repositoryPath(filepath.FromSlash(chainCopy))); !os.IsNotExist(err) {
+			t.Fatalf("the repo-local gate chain copy %s must not exist", chainCopy)
 		}
 	}
 

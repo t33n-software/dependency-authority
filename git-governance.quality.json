@@ -2,26 +2,15 @@
   "schemaVersion": 4,
   "toolchain": { "language": "go", "version": "1.26.6" },
   "extends": [],
-  "defaults": {
-    "includeFamilies": [
-      "feature",
-      "fix",
-      "docs",
-      "refactor",
-      "chore",
-      "test",
-      "perf",
-      "hotfix"
-    ]
-  },
   "gates": [
     {
       "name": "dependency-authority-source-quality",
       "command": "go",
       "args": [
-        "run",
-        "-mod=readonly",
-        "./cmd/build"
+        "tool",
+        "-modfile",
+        "tools/go.mod",
+        "quality-gate"
       ],
       "timeout": "15m"
     }
