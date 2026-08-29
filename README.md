@@ -119,19 +119,20 @@ variables set on the protected environments.
 ```text
 gofmt
 go test ./...
-go run -mod=readonly ./cmd/check-coverage
-go run -mod=readonly ./cmd/build
+go tool -modfile tools/go.mod check-coverage
+go tool -modfile tools/go.mod quality-gate
 ```
 
 Every executable Go package must reach exactly 100.0% statement coverage.
 
-`cmd/build` is the full source-level gate: formatting, module checksums and
-metadata, the pinned build tool module, lint (staticcheck), unit tests, exact
-100% statement coverage, race detector, static analysis, fail-closed
-vulnerability analysis (govulncheck), fuzz smoke lanes for the inbound
-configuration and adapter bindings boundaries, Lefthook configuration
-validation, Linux/AMD64 build of all five lane controllers, and module
-provenance.
+`quality-gate` runs the canonical gate chain of the go-quality-authority
+territory home through the pinned tooling module: formatting, module checksums
+and metadata, the pinned build tool module, lint (staticcheck), unit tests,
+exact 100% statement coverage, race detector, static analysis, fail-closed
+vulnerability analysis (govulncheck), the registered fuzz smoke lanes for the
+inbound configuration, adapter bindings, and operation inputs boundaries,
+Lefthook configuration validation, and native binary builds of all five lane
+controllers with smoke tests.
 
 The Go toolchain is pinned exactly (`toolchain go1.26.6`,
 `GOTOOLCHAIN=local`); no lane downloads a toolchain at build time. CI re-runs
@@ -149,8 +150,8 @@ every shared-line change.
 
 ## Repository layout
 
-- `cmd/` contains the five lane controllers plus the build and coverage
-  gates.
+- `cmd/` contains the five lane controllers; the canonical gate chain is
+  referenced through the `tools/` module pin.
 - `internal/dependency/domain/` contains the lifecycle, admission, approval,
   quarantine, revocation, and evidence domain models.
 - `internal/dependency/application/` contains the five lane use cases.
