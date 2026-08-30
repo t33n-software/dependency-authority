@@ -7,7 +7,7 @@
   "class": {
     "qualityGates": "linux-only",
     "codeScanning": true,
-    "licenseHub": false
+    "licenseHub": true
   },
   "callers": [
     {
