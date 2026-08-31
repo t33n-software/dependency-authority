@@ -1,4 +1,4 @@
-name: Canonical conformance
+name: Canonical Conformance
 
 on:
   push:
@@ -9,17 +9,9 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: canonical-conformance-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   conformance:
     name: Canonical conformance
     permissions:
       contents: read
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Verify canonical bindings
-        uses: t33n-software/repository-governance/.github/actions/verify-canonical-files@97dee624ecbff827619d781233aceb0b359a7120
+    uses: t33n-software/repository-governance/.github/workflows/reusable-canonical-conformance.yml@f38487662a91b52ad026c9c8c2333f008b4757e4
