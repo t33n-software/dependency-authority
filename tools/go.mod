@@ -8,6 +8,7 @@ tool (
 	github.com/evilmartians/lefthook/v2
 	github.com/t33n-software/go-quality-authority/cmd/check-coverage
 	github.com/t33n-software/go-quality-authority/cmd/quality-gate
+	github.com/t33n-software/license-hub/cmd/license
 	github.com/t33n-software/repository-governance/cmd/verify-canonical
 	golang.org/x/vuln/cmd/govulncheck
 	honnef.co/go/tools/cmd/staticcheck
@@ -58,8 +59,9 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/schollz/progressbar/v3 v3.19.1 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
-	github.com/t33n-software/go-quality-authority v0.0.0-20260828084041-7f40c7b35782 // indirect
-	github.com/t33n-software/repository-governance v0.0.0-20260827184532-d30fd11588a2 // indirect
+	github.com/t33n-software/go-quality-authority v0.0.0-20260830182047-58ab7d95cebf // indirect
+	github.com/t33n-software/license-hub v0.0.0-20260830165735-6f63ab95be35 // indirect
+	github.com/t33n-software/repository-governance v0.0.0-20260830232644-c14a3c132794 // indirect
 	github.com/tidwall/jsonc v0.3.3 // indirect
 	github.com/urfave/cli/v3 v3.10.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
