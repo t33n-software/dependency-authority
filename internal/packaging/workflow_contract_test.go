@@ -138,6 +138,58 @@ func TestConformanceWorkflowBindsTheVerifier(t *testing.T) {
 	}
 }
 
+// lifecycleFamilyBinding binds the tenant lifecycle callers to the canonical
+// release-lifecycle family of the git-governance home: the exact payload pin
+// on the merged home line plus the LF-stable content hash of every caller as
+// recorded by the home caller hash record at that pin.
+var lifecycleFamilyBinding = struct {
+	homeSHA string
+	callers map[string]string
+}{
+	homeSHA: "77da3857d8db3f3567522651750980e087c0a6eb",
+	callers: map[string]string{
+		"release-control.yml":                "5b339a721f8d31560090eb33f71d434686f17789ef0dc0309fe264b093604d4a",
+		"release-reconciliation.yml":         "7fc7eb6efe4a71aceeee2e1c2dec32e25506d4ed59af6f85c36a571c7a6a12da",
+		"execute-protected-line-request.yml": "7d166c87338cf6be30acbfcc4f01a807c464c0f0e2d9d0468e79ba229e9053b3",
+		"tag-promoted-release.yml":           "578ffd6c5498545c22a3639a66cb49ed1b44964c1eb162e839f470266123bada",
+		"publish-release-artifacts.yml":      "a790964db50b6bde5bfaca0b7358951952915cc2183300c97e36e83289521bd2",
+		"hotfix-delivery.yml":                "2b5ddf06163f0453465a67dede9adeb0ffcc70ff2733d413f5d997d5a2e60d97",
+		"hotfix-propagation.yml":             "476085ba51dbfb6f1d004943c5e603c95a8fa08d99371d58b96014d689f96208",
+	},
+}
+
+func TestLifecycleCallersBindTheGovernedFamily(t *testing.T) {
+	for _, name := range []string{
+		"release-control.yml",
+		"release-reconciliation.yml",
+		"execute-protected-line-request.yml",
+		"tag-promoted-release.yml",
+		"publish-release-artifacts.yml",
+		"hotfix-delivery.yml",
+		"hotfix-propagation.yml",
+	} {
+		want, bound := lifecycleFamilyBinding.callers[name]
+		if !bound {
+			t.Fatalf("no governed family binding recorded for %q", name)
+		}
+		path := filepath.Join(".github", "workflows", name)
+		if hash := hashRepositoryFile(t, path); hash != want {
+			t.Fatalf("the lifecycle caller %s hashes to %s, want the governed family hash %s", path, hash, want)
+		}
+		content := readRepositoryFile(t, path)
+		reference := "uses: t33n-software/git-governance/.github/workflows/reusable-" + name + "@" + lifecycleFamilyBinding.homeSHA
+		if !strings.Contains(content, reference) {
+			t.Fatalf("the lifecycle caller %s does not pin the governed family at the merged home line", path)
+		}
+	}
+	for _, legacy := range []string{"recover-protected-line-request.yml", "release.yml"} {
+		path := filepath.Join(".github", "workflows", legacy)
+		if _, err := os.Stat(repositoryPath(path)); !os.IsNotExist(err) {
+			t.Fatalf("the legacy lifecycle lane %s must be absent: the governed family carries the bound executor recovery mode and the release delivery", path)
+		}
+	}
+}
+
 func TestLaneWorkflowsBindTheProtectedEnvironments(t *testing.T) {
 	lanes := map[string]string{
 		"dep-intake-fetch":   "dependency-intake-controller",
@@ -409,6 +461,7 @@ func TestGoToolchainAndBuildToolingContract(t *testing.T) {
 		"github.com/t33n-software/go-quality-authority/cmd/quality-gate",
 		"github.com/t33n-software/go-quality-authority/cmd/check-coverage",
 		"github.com/t33n-software/repository-governance/cmd/verify-canonical",
+		"github.com/t33n-software/git-governance/cmd/git-governance",
 	} {
 		if !strings.Contains(toolsMod, required) {
 			t.Fatalf("tools/go.mod does not contain %q", required)
