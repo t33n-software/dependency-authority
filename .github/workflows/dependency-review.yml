@@ -1,0 +1,14 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main, develop, "release/**", "support/**"]
+
+permissions: {}
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    permissions:
+      contents: read
+    uses: t33n-software/repository-governance/.github/workflows/reusable-dependency-review.yml@f38487662a91b52ad026c9c8c2333f008b4757e4
