@@ -6,6 +6,7 @@ toolchain go1.26.6
 
 tool (
 	github.com/evilmartians/lefthook/v2
+	github.com/t33n-software/git-governance/cmd/git-governance
 	github.com/t33n-software/go-quality-authority/cmd/check-coverage
 	github.com/t33n-software/go-quality-authority/cmd/quality-gate
 	github.com/t33n-software/license-hub/cmd/license
@@ -16,19 +17,27 @@ tool (
 
 require (
 	al.essio.dev/pkg/shellescape v1.6.0 // indirect
+	charm.land/bubbles/v2 v2.0.0 // indirect
+	charm.land/bubbletea/v2 v2.0.2 // indirect
+	charm.land/huh/v2 v2.0.3 // indirect
 	charm.land/lipgloss/v2 v2.0.5 // indirect
 	github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c // indirect
+	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/briandowns/spinner v1.23.2 // indirect
+	github.com/catppuccin/go v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260205113103-524a6607adb8 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
+	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/creack/pty v1.1.24 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/evilmartians/lefthook/v2 v2.1.10 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
@@ -36,6 +45,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kaptinlin/jsonpointer v0.4.27 // indirect
 	github.com/kaptinlin/jsonschema v0.9.3 // indirect
 	github.com/knadh/koanf/maps v0.1.2 // indirect
@@ -52,6 +62,7 @@ require (
 	github.com/mattn/go-tty v0.0.8 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
+	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
@@ -59,6 +70,9 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/schollz/progressbar/v3 v3.19.1 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
+	github.com/spf13/cobra v1.10.2 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/t33n-software/git-governance v1.0.2-0.20260830080026-69a7b981e779 // indirect
 	github.com/t33n-software/go-quality-authority v0.0.0-20260830182047-58ab7d95cebf // indirect
 	github.com/t33n-software/license-hub v0.0.0-20260830165735-6f63ab95be35 // indirect
 	github.com/t33n-software/repository-governance v0.0.0-20260831180650-ba17dc997032 // indirect
