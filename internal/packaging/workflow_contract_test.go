@@ -191,33 +191,70 @@ func TestLifecycleCallersBindTheGovernedFamily(t *testing.T) {
 }
 
 func TestLaneWorkflowsBindTheProtectedEnvironments(t *testing.T) {
-	lanes := map[string]string{
-		"dep-intake-fetch":   "dependency-intake-controller",
-		"dep-admission":      "dependency-admission-controller",
-		"dep-promotion":      "dependency-promotion-controller",
-		"dep-revalidation":   "dependency-revalidation-controller",
-		"dep-revocation":     "dependency-revocation-controller",
-		"dep-evidence-write": "",
-		"dep-evidence-audit": "",
+	lanes := []string{
+		"dep-intake-fetch",
+		"dep-admission",
+		"dep-promotion",
+		"dep-revalidation",
+		"dep-revocation",
+		"dep-evidence-write",
+		"dep-evidence-audit",
 	}
-	for lane, controller := range lanes {
+	for _, lane := range lanes {
+		environmentKey := strings.ToUpper(strings.ReplaceAll(lane, "-", "_"))
 		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
 		for _, required := range []string{
 			"workflow_dispatch:",
 			"environment: " + lane,
+			"contents: read",
 			"id-token: write",
+			"persist-credentials: false",
 			"google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093",
+			"workload_identity_provider: ${{ vars." + environmentKey + "_WIF_PROVIDER }}",
+			"service_account: ${{ vars." + environmentKey + "_TRIGGER_SERVICE_ACCOUNT }}",
+			"WORKLOAD_JOB: ${{ vars." + environmentKey + "_WORKLOAD_JOB }}",
+			"gcloud run jobs execute",
+			"--wait",
+			`--format="value(name)"`,
+			"gcloud run jobs executions describe",
 		} {
 			if !strings.Contains(content, required) {
 				t.Fatalf("lane workflow %s does not contain %q", lane, required)
 			}
 		}
-		if controller != "" && !strings.Contains(content, "./cmd/"+controller) {
-			t.Fatalf("lane workflow %s does not build %q", lane, controller)
-		}
-		for _, forbidden := range []string{"t33n-software", "pull_request", "\n  push:", "schedule:"} {
+		for _, forbidden := range []string{
+			"t33n-software",
+			"pull_request",
+			"\n  push:",
+			"schedule:",
+			"token_format",
+			"DEPENDENCY_AUTHORITY_ACCESS_TOKEN",
+			"setup-go",
+			"go build",
+			"go env",
+			"curl",
+			"DEPENDENCY_AUTHORITY_ZONE",
+			"DEPENDENCY_AUTHORITY_ECOSYSTEM",
+			"DEPENDENCY_AUTHORITY_ARTIFACT_API",
+			"DEPENDENCY_AUTHORITY_UPSTREAM_ENDPOINT",
+			"DEPENDENCY_AUTHORITY_APPROVED_ENDPOINT",
+			"DEPENDENCY_AUTHORITY_EVIDENCE_REPOSITORY",
+			"DEPENDENCY_AUTHORITY_APPROVED_REPOSITORY",
+			"DEPENDENCY_AUTHORITY_POLICY_BUNDLE",
+			"DEPENDENCY_AUTHORITY_SCANNER",
+			"DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT",
+			"DEPENDENCY_AUTHORITY_LANE_IDENTITY",
+			"DEP_PROBE_",
+			"DEP_INTAKE_FETCHER_SERVICE_ACCOUNT",
+			"DEP_ADMISSION_CONTROLLER_SERVICE_ACCOUNT",
+			"DEP_APPROVED_PROMOTER_SERVICE_ACCOUNT",
+			"DEP_REVALIDATION_CONTROLLER_SERVICE_ACCOUNT",
+			"DEP_REVOCATION_CONTROLLER_SERVICE_ACCOUNT",
+			"DEP_EVIDENCE_WRITER_SERVICE_ACCOUNT",
+			"DEP_EVIDENCE_AUDITOR_SERVICE_ACCOUNT",
+		} {
 			if strings.Contains(content, forbidden) {
-				t.Fatalf("lane workflow %s contains %q; lanes are organization-agnostic and dispatch-only", lane, forbidden)
+				t.Fatalf("lane workflow %s contains %q; lanes are organization-agnostic dispatch-only triggers over the compute control plane and never carry the retired in-lane execution form", lane, forbidden)
 			}
 		}
 		for _, line := range strings.Split(content, "\n") {
@@ -248,35 +285,33 @@ func isHex(value string) bool {
 func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
 	lanes := map[string][]string{
 		"dep-intake-fetch": {
-			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
+			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
 		},
 		"dep-admission": {
-			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
-			"DEPENDENCY_AUTHORITY_LANE_IDENTITY", "DEPENDENCY_AUTHORITY_SCANNER_IDENTITY",
-			"DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY", "DEPENDENCY_AUTHORITY_APPROVAL_TTL",
+			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
+			"DEPENDENCY_AUTHORITY_APPROVAL_TTL=72h",
 		},
 		"dep-promotion": {
-			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
+			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
 		},
 		"dep-revalidation": {
-			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
-			"DEPENDENCY_AUTHORITY_SCANNER_IDENTITY", "DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY",
+			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
 		},
 		"dep-revocation": {
-			"DEPENDENCY_AUTHORITY_MODULE", "DEPENDENCY_AUTHORITY_VERSION",
-			"DEPENDENCY_AUTHORITY_LANE_IDENTITY", "DEPENDENCY_AUTHORITY_REVOCATION_REASON",
+			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
+			"DEPENDENCY_AUTHORITY_REVOCATION_REASON=${{ inputs.reason }}",
 		},
 	}
-	for lane, required := range lanes {
+	for lane, bindings := range lanes {
 		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
-		for _, needle := range []string{"inputs:", "module:", "version:", "${{ inputs.module }}", "${{ inputs.version }}"} {
+		for _, needle := range []string{"inputs:", "module:", "version:", "--update-env-vars="} {
 			if !strings.Contains(content, needle) {
-				t.Fatalf("lane workflow %s does not declare the dispatch input %q", lane, needle)
+				t.Fatalf("lane workflow %s does not declare the dispatch input transport %q", lane, needle)
 			}
 		}
-		for _, binding := range required {
-			if !strings.Contains(content, binding+":") {
-				t.Fatalf("lane workflow %s does not bind %q", lane, binding)
+		for _, binding := range bindings {
+			if !strings.Contains(content, binding) {
+				t.Fatalf("lane workflow %s does not pass %q as an execution parameter", lane, binding)
 			}
 		}
 	}
@@ -284,6 +319,13 @@ func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
 	revocation := readRepositoryFile(t, ".github/workflows/dep-revocation.yml")
 	if !strings.Contains(revocation, "reason:") || !strings.Contains(revocation, "${{ inputs.reason }}") {
 		t.Fatal("the revocation lane does not bind the revocation reason input")
+	}
+
+	for _, lane := range []string{"dep-evidence-write", "dep-evidence-audit"} {
+		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
+		if strings.Contains(content, "--update-env-vars") {
+			t.Fatalf("the evidence lane %s must not pass operation inputs; its workload job takes none", lane)
+		}
 	}
 }
 

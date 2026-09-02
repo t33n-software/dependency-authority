@@ -3,13 +3,7 @@ name: dep-evidence-write lane
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-env:
-  GOTOOLCHAIN: local
-  GOFLAGS: -mod=readonly
-  GOVCS: "*:off"
+permissions: {}
 
 concurrency:
   group: dep-evidence-write-${{ github.ref }}
@@ -30,41 +24,50 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Authenticate the evidence writer identity
-        id: auth
+      - name: Authenticate the evidence write trigger identity
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.DEP_EVIDENCE_WRITE_WIF_PROVIDER }}
-          service_account: ${{ vars.DEP_EVIDENCE_WRITER_SERVICE_ACCOUNT }}
+          service_account: ${{ vars.DEP_EVIDENCE_WRITE_TRIGGER_SERVICE_ACCOUNT }}
 
-      - name: Write the lane run evidence marker
+      - name: Invoke the evidence write workload job
+        id: invoke
         env:
-          EVIDENCE_REPOSITORY: ${{ vars.DEP_EVIDENCE_REPOSITORY }}
-          RUN_DOCUMENT: .build/lane-run.json
+          WORKLOAD_JOB: ${{ vars.DEP_EVIDENCE_WRITE_WORKLOAD_JOB }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$EVIDENCE_REPOSITORY"
-          mkdir -p .build
-          IFS='/' read -ra SEGMENTS <<< "$EVIDENCE_REPOSITORY"
+          test -n "$WORKLOAD_JOB"
+          IFS='/' read -ra SEGMENTS <<< "$WORKLOAD_JOB"
           PROJECT="${SEGMENTS[1]}"
-          LOCATION="${SEGMENTS[3]}"
-          REPOSITORY="${SEGMENTS[5]}"
+          REGION="${SEGMENTS[3]}"
+          JOB="${SEGMENTS[5]}"
           test -n "$PROJECT"
-          test -n "$LOCATION"
-          test -n "$REPOSITORY"
-          printf '{"schema":"dependency-authority/lane-run/v1","environment":"dep-evidence-write","repository":"%s","ref":"%s","run_id":"%s","run_attempt":"%s","actor":"%s","recorded_at":"%s"}\n' \
-            "${{ github.repository }}" \
-            "${{ github.ref }}" \
-            "${{ github.run_id }}" \
-            "${{ github.run_attempt }}" \
-            "${{ github.actor }}" \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUN_DOCUMENT"
-          gcloud artifacts generic upload \
+          test -n "$REGION"
+          test -n "$JOB"
+          EXECUTION="$(gcloud run jobs execute "$JOB" \
             --project="$PROJECT" \
-            --location="$LOCATION" \
-            --repository="$REPOSITORY" \
-            --package=lane-runs \
-            --version=v1 \
-            --source="$RUN_DOCUMENT" \
-            --destination-path="dep-evidence-write/${{ github.run_id }}-${{ github.run_attempt }}.json"
+            --region="$REGION" \
+            --wait \
+            --format="value(name)")"
+          test -n "$EXECUTION"
+          echo "execution=$EXECUTION" >> "$GITHUB_OUTPUT"
+
+      - name: Read the execution status and report the evidence surface
+        env:
+          WORKLOAD_JOB: ${{ vars.DEP_EVIDENCE_WRITE_WORKLOAD_JOB }}
+          EXECUTION: ${{ steps.invoke.outputs.execution }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS='/' read -ra SEGMENTS <<< "$WORKLOAD_JOB"
+          PROJECT="${SEGMENTS[1]}"
+          REGION="${SEGMENTS[3]}"
+          test -n "$EXECUTION"
+          gcloud run jobs executions describe "$EXECUTION" \
+            --project="$PROJECT" \
+            --region="$REGION" \
+            --format=json > execution.json
+          jq -e '.completionTime != null and ((.succeededCount // 0) >= 1) and ((.failedCount // 0) == 0)' execution.json > /dev/null
+          jq -r '"execution: " + .name, "completed: " + .completionTime, "evidence audit pointer: " + .logUri' execution.json
+          echo "evidence locators: the job writes the content-addressed evidence inside the perimeter; the internal evidence index proves them (dep-evidence-audit)."
