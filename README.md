@@ -152,6 +152,10 @@ every shared-line change.
 
 - `cmd/` contains the five lane controllers; the canonical gate chain is
   referenced through the `tools/` module pin.
+- `Dockerfile` is the single parameterized controller workload image form
+  (GO-SCF-019): the pure packaging of a locally built controller binary on
+  the digest-pinned minimal non-root runtime; the build and delivery
+  procedure lives in `docs/operations/controller-image-substrate.md`.
 - `internal/dependency/domain/` contains the lifecycle, admission, approval,
   quarantine, revocation, and evidence domain models.
 - `internal/dependency/application/` contains the five lane use cases.
