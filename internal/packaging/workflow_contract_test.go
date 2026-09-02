@@ -497,6 +497,64 @@ func TestGoToolchainAndBuildToolingContract(t *testing.T) {
 	}
 }
 
+func TestControllerImageSubstrateBindsTheGovernedBuildForm(t *testing.T) {
+	dockerfile := readRepositoryFile(t, "Dockerfile")
+	for _, required := range []string{
+		"FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab",
+		"ARG CONTROLLER",
+		"COPY .build/controller-images/${CONTROLLER} /controller",
+		"USER 65532:65532",
+		`ENTRYPOINT ["/controller"]`,
+	} {
+		if !strings.Contains(dockerfile, required) {
+			t.Fatalf("Dockerfile does not bind %q", required)
+		}
+	}
+	for _, forbidden := range []string{"# syntax", "latest", "AS builder", "go build"} {
+		if strings.Contains(dockerfile, forbidden) {
+			t.Fatalf("Dockerfile contains %q; the substrate is pure packaging on the digest-pinned minimal non-root runtime", forbidden)
+		}
+	}
+
+	runbook := readRepositoryFile(t, filepath.Join("docs", "operations", "controller-image-substrate.md"))
+	for _, controller := range []string{
+		"dependency-intake-controller",
+		"dependency-admission-controller",
+		"dependency-promotion-controller",
+		"dependency-revalidation-controller",
+		"dependency-revocation-controller",
+	} {
+		if !strings.Contains(runbook, controller) {
+			t.Fatalf("the controller image runbook does not bind %q", controller)
+		}
+	}
+	for _, required := range []string{
+		"GOTOOLCHAIN=local",
+		"CGO_ENABLED=0",
+		"GOOS=linux",
+		"GOARCH=amd64",
+		"-trimpath",
+		`"-s -w"`,
+		"sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab",
+		"staging-controller-images",
+		"release-controller-images",
+	} {
+		if !strings.Contains(runbook, required) {
+			t.Fatalf("the controller image runbook does not bind %q", required)
+		}
+	}
+
+	readme := readRepositoryFile(t, "README.md")
+	if !strings.Contains(readme, "Dockerfile") {
+		t.Fatal("README.md does not document the root Dockerfile in the repository layout")
+	}
+
+	traceability := readRepositoryFile(t, filepath.Join("docs", "TRACEABILITY.md"))
+	if !strings.Contains(traceability, "DA-16") {
+		t.Fatal("TRACEABILITY.md does not contain DA-16")
+	}
+}
+
 func readRepositoryFile(t *testing.T, path string) string {
 	t.Helper()
 	content, err := os.ReadFile(repositoryPath(filepath.FromSlash(path)))
