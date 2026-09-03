@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"context"
 	"testing"
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
@@ -24,7 +23,6 @@ func fullLaneEnv() map[string]string {
 		config.EnvScannerTool:        "tools/osv-scanner",
 		config.EnvScannerDatabase:    "tools/osv-db",
 		config.EnvScanContentRoot:    "work/content",
-		config.EnvAccessToken:        "token",
 	}
 }
 
@@ -198,15 +196,5 @@ func TestPortsFromEnvPropagatesAdapterValidation(t *testing.T) {
 				t.Fatal("PortsFromEnv() error = nil, want adapter validation error")
 			}
 		})
-	}
-}
-
-func TestStaticTokenSource(t *testing.T) {
-	token, err := staticTokenSource("token").token(context.Background())
-	if err != nil {
-		t.Fatalf("token() error = %v", err)
-	}
-	if token != "token" {
-		t.Fatalf("token() = %q, want token", token)
 	}
 }

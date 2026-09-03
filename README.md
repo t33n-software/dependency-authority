@@ -87,10 +87,17 @@ The adapters bind through the validated lane environment:
 | `DEPENDENCY_AUTHORITY_SCANNER_TOOL` | pinned scanner tool path |
 | `DEPENDENCY_AUTHORITY_SCANNER_DATABASE` | scanner database snapshot directory |
 | `DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT` | candidate materialization root |
-| `DEPENDENCY_AUTHORITY_ACCESS_TOKEN` | short-lived lane token (process memory only, never logged) |
 
 An adapter binds only when its complete environment contract is present; a
 lane requiring an unbound adapter fails closed at bind time.
+
+The controllers authenticate to the trust-zone APIs through the identity
+attached to the workload: each controller obtains short-lived access tokens at
+runtime from the provider instance metadata mechanism (process memory only,
+cached until the expiry minus a safety skew, refreshed under a single-flight
+guard) and fails closed outside the provider runtime. No credential is
+injected through the environment, parameters, image content, mounts, or the
+control plane.
 
 ## Lane workflows
 
