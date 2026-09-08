@@ -82,6 +82,6 @@ jobs:
             --project="$PROJECT" \
             --region="$REGION" \
             --format=json > execution.json
-          jq -e '.completionTime != null and ((.succeededCount // 0) >= 1) and ((.failedCount // 0) == 0)' execution.json > /dev/null
-          jq -r '"execution: " + .name, "completed: " + .completionTime, "evidence audit pointer: " + .logUri' execution.json
+          jq -e '.status.completionTime != null and ((.status.succeededCount // 0) >= 1) and ((.status.failedCount // 0) == 0)' execution.json > /dev/null
+          jq -r '"execution: " + .name, "completed: " + .status.completionTime, "evidence audit pointer: " + .status.logUri' execution.json
           echo "evidence locators: the job writes the content-addressed evidence inside the perimeter; the internal evidence index proves them (dep-evidence-audit)."

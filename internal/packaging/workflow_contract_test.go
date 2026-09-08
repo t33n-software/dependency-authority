@@ -217,6 +217,9 @@ func TestLaneWorkflowsBindTheProtectedEnvironments(t *testing.T) {
 			"--wait",
 			`--format="value(name)"`,
 			"gcloud run jobs executions describe",
+			`jq -e '.status.completionTime != null and ((.status.succeededCount // 0) >= 1) and ((.status.failedCount // 0) == 0)'`,
+			`"completed: " + .status.completionTime`,
+			`"evidence audit pointer: " + .status.logUri`,
 		} {
 			if !strings.Contains(content, required) {
 				t.Fatalf("lane workflow %s does not contain %q", lane, required)
@@ -255,6 +258,19 @@ func TestLaneWorkflowsBindTheProtectedEnvironments(t *testing.T) {
 		} {
 			if strings.Contains(content, forbidden) {
 				t.Fatalf("lane workflow %s contains %q; lanes are organization-agnostic dispatch-only triggers over the compute control plane and never carry the retired in-lane execution form", lane, forbidden)
+			}
+		}
+		// Regression guard (DA-19): the v2 execution resource carries the
+		// status fields under the status wrapper; the retired top-level read
+		// paths would report a false failure on a green run and must never
+		// return.
+		for _, retired := range []string{
+			`jq -e '.completionTime != null`,
+			`"completed: " + .completionTime`,
+			`"evidence audit pointer: " + .logUri`,
+		} {
+			if strings.Contains(content, retired) {
+				t.Fatalf("lane workflow %s contains the retired top-level execution status read path %q; the v2 execution resource carries these fields under the status wrapper", lane, retired)
 			}
 		}
 		for _, line := range strings.Split(content, "\n") {
