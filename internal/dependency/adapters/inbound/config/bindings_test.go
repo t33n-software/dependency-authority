@@ -27,7 +27,6 @@ func TestBindingsFromEnvBindsEveryValue(t *testing.T) {
 		EnvScannerTool:        "tools/osv-scanner",
 		EnvScannerDatabase:    "tools/osv-db",
 		EnvScanContentRoot:    "work/content",
-		EnvAccessToken:        " token-value ",
 	}))
 	if err != nil {
 		t.Fatalf("BindingsFromEnv() error = %v", err)
@@ -51,9 +50,6 @@ func TestBindingsFromEnvBindsEveryValue(t *testing.T) {
 			t.Errorf("%s = %q, want %q", name, got.got, got.want)
 		}
 	}
-	if bindings.AccessToken() != " token-value " {
-		t.Fatalf("AccessToken() = %q, want the untrimmed credential", bindings.AccessToken())
-	}
 }
 
 func TestBindingsFromEnvEmptyEnvironment(t *testing.T) {
@@ -71,7 +67,6 @@ func TestBindingsFromEnvEmptyEnvironment(t *testing.T) {
 		"scanner tool":        bindings.ScannerTool(),
 		"scanner database":    bindings.ScannerDatabase(),
 		"scan content root":   bindings.ScanContentRoot(),
-		"access token":        bindings.AccessToken(),
 	} {
 		if got != "" {
 			t.Errorf("%s = %q, want empty", name, got)

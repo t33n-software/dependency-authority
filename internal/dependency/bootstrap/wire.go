@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,19 +12,11 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/policy"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/scanner"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/upstream"
+	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/workloadidentity"
 )
 
 // PortsBuilder constructs the outbound ports from the process environment.
 type PortsBuilder func(lookup func(string) string) (Ports, error)
-
-// staticTokenSource binds the environment-provided short-lived access token
-// to the per-request token source contract of the adapters.
-type staticTokenSource string
-
-// token returns the bound token. The value is process memory only.
-func (s staticTokenSource) token(context.Context) (string, error) {
-	return string(s), nil
-}
 
 // PortsFromEnv constructs the outbound adapters bound by the lane
 // environment. An adapter binds only when its complete environment contract
@@ -39,7 +30,12 @@ func PortsFromEnv(lookup func(string) string) (Ports, error) {
 
 	ports := Ports{Now: time.Now}
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	token := staticTokenSource(bindings.AccessToken()).token
+
+	// The workload-internal authentication contract: the adapters authenticate
+	// with short-lived tokens from the identity attached to the workload,
+	// obtained at runtime through the provider instance metadata mechanism. No
+	// credential is injected through the environment.
+	token := workloadidentity.NewGCPSource().Token
 
 	if bindings.UpstreamEndpoint() != "" {
 		proxy, err := upstream.NewProxy(bindings.UpstreamEndpoint(), token, httpClient)

@@ -49,23 +49,21 @@ func FuzzFromEnv(f *testing.F) {
 }
 
 func FuzzBindingsFromEnv(f *testing.F) {
-	for _, seed := range [][3]string{
-		{"https://europe-west3-go.pkg.dev/p/r", "projects/p/locations/l/repositories/r", "token"},
-		{"", "", ""},
-		{"not a url", "bogus", " "},
-		{"\x00", "\x00", "\x00"},
+	for _, seed := range [][2]string{
+		{"https://europe-west3-go.pkg.dev/p/r", "projects/p/locations/l/repositories/r"},
+		{"", ""},
+		{"not a url", "bogus"},
+		{"\x00", "\x00"},
 	} {
-		f.Add(seed[0], seed[1], seed[2])
+		f.Add(seed[0], seed[1])
 	}
-	f.Fuzz(func(t *testing.T, endpoint, repository, token string) {
+	f.Fuzz(func(t *testing.T, endpoint, repository string) {
 		lookup := func(name string) string {
 			switch name {
 			case EnvUpstreamEndpoint, EnvApprovedEndpoint, EnvArtifactAPI:
 				return endpoint
 			case EnvEvidenceRepository, EnvApprovedRepository:
 				return repository
-			case EnvAccessToken:
-				return token
 			default:
 				return ""
 			}
@@ -79,9 +77,6 @@ func FuzzBindingsFromEnv(f *testing.F) {
 		}
 		if bindings.EvidenceRepository() != strings.TrimSpace(repository) {
 			t.Fatalf("EvidenceRepository() = %q, want the trimmed input", bindings.EvidenceRepository())
-		}
-		if bindings.AccessToken() != token {
-			t.Fatalf("AccessToken() = %q, want the untrimmed input", bindings.AccessToken())
 		}
 	})
 }

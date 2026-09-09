@@ -24,9 +24,6 @@ const (
 	EnvScannerDatabase = "DEPENDENCY_AUTHORITY_SCANNER_DATABASE"
 	// EnvScanContentRoot names the candidate materialization root.
 	EnvScanContentRoot = "DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT"
-	// EnvAccessToken names the short-lived lane access token. The value is
-	// process memory only and is never logged.
-	EnvAccessToken = "DEPENDENCY_AUTHORITY_ACCESS_TOKEN"
 )
 
 // Bindings carries the outbound adapter bindings of the lane environment.
@@ -43,7 +40,6 @@ type Bindings struct {
 	scannerTool        string
 	scannerDatabase    string
 	scanContentRoot    string
-	accessToken        string
 }
 
 // BindingsFromEnv loads the adapter bindings from the process environment.
@@ -61,7 +57,6 @@ func BindingsFromEnv(lookup func(string) string) (Bindings, error) {
 		scannerTool:        strings.TrimSpace(lookup(EnvScannerTool)),
 		scannerDatabase:    strings.TrimSpace(lookup(EnvScannerDatabase)),
 		scanContentRoot:    strings.TrimSpace(lookup(EnvScanContentRoot)),
-		accessToken:        lookup(EnvAccessToken),
 	}, nil
 }
 
@@ -108,9 +103,4 @@ func (b Bindings) ScannerDatabase() string {
 // ScanContentRoot returns the candidate materialization root.
 func (b Bindings) ScanContentRoot() string {
 	return b.scanContentRoot
-}
-
-// AccessToken returns the short-lived lane access token.
-func (b Bindings) AccessToken() string {
-	return b.accessToken
 }

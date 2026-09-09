@@ -83,6 +83,26 @@ bound counterparts of those providers.
    required exception becomes a governed, zone-scoped change and is never
    assumed in advance.
 
+8. **Trigger-form lane execution.** The seven lane workflows are
+   authenticated triggers, never executors: each lane authenticates as the
+   dedicated invoke-only trigger identity of its operation
+   (`dep-<operation>-trigger`), invokes the zone-resident Cloud Run job of
+   its operation over the compute control plane (`run.googleapis.com`) with
+   the operation inputs as execution parameters, reads the execution status
+   back over the same plane, and reports the control-plane audit pointer.
+   The lane identity carries no data-plane grant; a direct lane call against
+   a restricted service is the intended fail-closed perimeter denial. The
+   controller domain logic is unchanged — only the execution environment
+   moves inside the perimeter, and the lane input validation of DA-7 runs
+   again fail-closed inside the job. The lane environments keep their
+   dispatch form, their protection rules, and their reviewer gates; their
+   variable surface retargets to the trigger identities
+   (`DEP_<OPERATION>_TRIGGER_SERVICE_ACCOUNT`) and adds the workload job
+   coordinate (`DEP_<OPERATION>_WORKLOAD_JOB`), while the data-plane
+   references move into the job environment bound at provisioning time. The
+   empirical perimeter intake check of item 7 is answered by the job
+   execution from inside, never by a lane-side probe.
+
 ## Consequences
 
 - Adapter implementations arrive with the trust-zone lane tickets as
@@ -98,3 +118,7 @@ bound counterparts of those providers.
   VCS fallback, `go mod tidy -diff` does not mutate the admitted graph,
   `go mod verify` passes, and `go version -m` matches the approved graph
   evidence — bind these decisions end to end.
+- The lane workflows carry no controller build, no Go toolchain, no raw
+  access tokens, and no data-plane references; the workload jobs execute the
+  unchanged controllers inside the perimeter, and the lane proves the
+  execution status fail-closed over the compute control plane.
