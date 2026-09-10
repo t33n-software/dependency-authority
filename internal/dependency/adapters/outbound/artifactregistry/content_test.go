@@ -50,7 +50,7 @@ func TestNewCandidateContentValidatesConfiguration(t *testing.T) {
 func TestMaterializeFetchesProvesAndPlaces(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	root := t.TempDir()
-	content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), root)
+	content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), root)
 	subject := publishableCandidate(t, archive)
 
 	target, err := content.Materialize(context.Background(), subject)
@@ -88,7 +88,7 @@ func TestMaterializeSkipsTheProvenTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The transport fails on any call: a skip must not fetch.
-	content := newCandidateContent(t, doerFunc(publisherFixture{transportErr: errors.New("unexpected fetch")}.do), root)
+	content := newCandidateContent(t, doerFunc((&publisherFixture{transportErr: errors.New("unexpected fetch")}).do), root)
 	got, err := content.Materialize(context.Background(), subject)
 	if err != nil {
 		t.Fatalf("Materialize() error = %v", err)
@@ -108,7 +108,7 @@ func TestMaterializeRejectsTheUnprovenTarget(t *testing.T) {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), root)
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), root)
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the unproven target failure")
 		}
@@ -123,7 +123,7 @@ func TestMaterializeRejectsTheUnprovenTarget(t *testing.T) {
 		if err := os.WriteFile(target+".sha256", []byte("sha256:"+strings.Repeat("0", 64)), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), root)
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), root)
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the drifted target failure")
 		}
@@ -140,7 +140,7 @@ func TestMaterializeRejectsTheUnprovenTarget(t *testing.T) {
 		readMarker = func(string) ([]byte, error) {
 			return nil, errors.New("marker unreadable")
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), root)
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), root)
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the marker read failure")
 		}
@@ -175,7 +175,7 @@ func TestMaterializeRejectsDigestDrift(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	drifted := moduleZip(t, "example.com/mod@v1.0.0/", map[string]string{"go.mod": "module example.com/mod\n"})
 	root := t.TempDir()
-	content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), root)
+	content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), root)
 	subject := publishableCandidate(t, drifted)
 	if _, err := content.Materialize(context.Background(), subject); err == nil {
 		t.Fatal("Materialize() error = nil, want the digest drift failure")
@@ -193,17 +193,17 @@ func TestMaterializeFetchFailures(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	subject := publishableCandidate(t, archive)
 
-	content := newCandidateContent(t, doerFunc(publisherFixture{intakeStatus: http.StatusNotFound}.do), t.TempDir())
+	content := newCandidateContent(t, doerFunc((&publisherFixture{intakeStatus: http.StatusNotFound}).do), t.TempDir())
 	if _, err := content.Materialize(context.Background(), subject); err == nil {
 		t.Fatal("Materialize() error = nil, want the not-found failure")
 	}
 
-	content = newCandidateContent(t, doerFunc(publisherFixture{intakeStatus: http.StatusInternalServerError}.do), t.TempDir())
+	content = newCandidateContent(t, doerFunc((&publisherFixture{intakeStatus: http.StatusInternalServerError}).do), t.TempDir())
 	if _, err := content.Materialize(context.Background(), subject); err == nil {
 		t.Fatal("Materialize() error = nil, want the status failure")
 	}
 
-	content = newCandidateContent(t, doerFunc(publisherFixture{transportErr: errors.New("reset")}.do), t.TempDir())
+	content = newCandidateContent(t, doerFunc((&publisherFixture{transportErr: errors.New("reset")}).do), t.TempDir())
 	if _, err := content.Materialize(context.Background(), subject); err == nil {
 		t.Fatal("Materialize() error = nil, want the transport failure")
 	}
@@ -211,7 +211,7 @@ func TestMaterializeFetchFailures(t *testing.T) {
 
 func TestMaterializeRejectsCorruptArchive(t *testing.T) {
 	corrupt := []byte("not a zip")
-	content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: corrupt}.do), t.TempDir())
+	content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: corrupt}).do), t.TempDir())
 	subject := publishableCandidate(t, corrupt)
 	if _, err := content.Materialize(context.Background(), subject); err == nil {
 		t.Fatal("Materialize() error = nil, want the archive failure")
@@ -228,7 +228,7 @@ func TestPlaceCandidateContentFailures(t *testing.T) {
 		createModuleDir = func(string, os.FileMode) error {
 			return errors.New("mkdir failure")
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), t.TempDir())
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), t.TempDir())
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the parent directory failure")
 		}
@@ -240,7 +240,7 @@ func TestPlaceCandidateContentFailures(t *testing.T) {
 		removeTree = func(string) error {
 			return errors.New("remove failure")
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), t.TempDir())
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), t.TempDir())
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the staging clear failure")
 		}
@@ -252,7 +252,7 @@ func TestPlaceCandidateContentFailures(t *testing.T) {
 		renameTree = func(string, string) error {
 			return errors.New("rename failure")
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), t.TempDir())
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), t.TempDir())
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the rename failure")
 		}
@@ -265,7 +265,7 @@ func TestPlaceCandidateContentFailures(t *testing.T) {
 		writeMarker = func(string, []byte, os.FileMode) error {
 			return errors.New("marker failure")
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), root)
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), root)
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the marker failure")
 		}
@@ -289,7 +289,7 @@ func TestPlaceCandidateContentFailures(t *testing.T) {
 			}
 			return nil
 		}
-		content := newCandidateContent(t, doerFunc(publisherFixture{intakeArchive: archive}.do), t.TempDir())
+		content := newCandidateContent(t, doerFunc((&publisherFixture{intakeArchive: archive}).do), t.TempDir())
 		if _, err := content.Materialize(context.Background(), subject); err == nil {
 			t.Fatal("Materialize() error = nil, want the final staging clear failure")
 		}

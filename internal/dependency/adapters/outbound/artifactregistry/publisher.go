@@ -5,14 +5,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
@@ -28,31 +32,20 @@ var maxModuleArchiveBytes int64 = 512 << 20
 // fault-injecting fake.
 var createModuleDir = os.MkdirAll
 
-// Runner executes the pinned gcloud upload tool.
-type Runner func(ctx context.Context, dir string, name string, args ...string) (Result, error)
-
-// Result carries the process outcome of the upload tool.
-type Result struct {
-	Stdout   []byte
-	ExitCode int
-}
-
 // Publisher promotes a verified candidate into the approved zone and proves
 // the Go content identity before and after the publication.
 type Publisher struct {
 	client     Client
 	intake     *url.URL
 	approved   *url.URL
-	project    string
-	location   string
 	repository string
-	run        Runner
 	tempDir    func() (string, func(), error)
 }
 
 // NewPublisher constructs the approved-zone publisher and fails closed on
-// invalid endpoints, an invalid approved repository binding, or nil seams.
-func NewPublisher(client Client, intakeEndpoint string, approvedEndpoint string, approvedRepository string, run Runner, tempDir func() (string, func(), error)) (Publisher, error) {
+// invalid endpoints, an invalid approved repository binding, or a nil
+// workspace factory.
+func NewPublisher(client Client, intakeEndpoint string, approvedEndpoint string, approvedRepository string, tempDir func() (string, func(), error)) (Publisher, error) {
 	intake, err := parseGoEndpoint(intakeEndpoint, "intake")
 	if err != nil {
 		return Publisher{}, err
@@ -61,12 +54,8 @@ func NewPublisher(client Client, intakeEndpoint string, approvedEndpoint string,
 	if err != nil {
 		return Publisher{}, err
 	}
-	project, location, repository, err := parseRepository(approvedRepository)
-	if err != nil {
+	if _, _, _, err := parseRepository(approvedRepository); err != nil {
 		return Publisher{}, err
-	}
-	if run == nil {
-		return Publisher{}, errors.New("publisher runner must not be nil")
 	}
 	if tempDir == nil {
 		return Publisher{}, errors.New("publisher temp-dir factory must not be nil")
@@ -75,10 +64,7 @@ func NewPublisher(client Client, intakeEndpoint string, approvedEndpoint string,
 		client:     client,
 		intake:     intake,
 		approved:   approved,
-		project:    project,
-		location:   location,
-		repository: repository,
-		run:        run,
+		repository: approvedRepository,
 		tempDir:    tempDir,
 	}, nil
 }
@@ -107,7 +93,7 @@ func (p Publisher) Publish(ctx context.Context, subject candidate.Candidate, _ [
 		return fmt.Errorf("hash materialized module before publication: %w", err)
 	}
 
-	if err := p.upload(ctx, source, subject); err != nil {
+	if err := p.upload(ctx, intakeArchive); err != nil {
 		return err
 	}
 
@@ -174,25 +160,139 @@ func (p Publisher) materialize(subject candidate.Candidate, archive []byte) (str
 	return root, cleanup, nil
 }
 
-// upload publishes the materialized module through the pinned gcloud upload
-// tool, which authenticates through the lane's application default
-// credentials.
-func (p Publisher) upload(ctx context.Context, source string, subject candidate.Candidate) error {
-	result, err := p.run(ctx, source, "gcloud", "artifacts", "go", "upload",
-		"--project="+p.project,
-		"--location="+p.location,
-		"--repository="+p.repository,
-		"--module-path="+subject.Name(),
-		"--version="+subject.Version(),
-		"--source="+source,
-	)
+// upload publishes the proven module archive to the approved repository
+// through the direct Artifact Registry Go module upload and waits fail-closed
+// for the upload operation to complete. The archive bytes are exactly the
+// content the intake digest proof bound; the module identity travels inside
+// the canonical archive.
+func (p Publisher) upload(ctx context.Context, archive []byte) error {
+	body, contentType := encodeModuleUpload(archive)
+	requestURL := p.client.api + "/upload/v1/" + p.repository + "/goModules:create?uploadType=multipart"
+	content, status, err := p.client.do(ctx, http.MethodPost, requestURL, body, contentType)
 	if err != nil {
-		return fmt.Errorf("execute module upload: %w", err)
+		return err
 	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("module upload exited with code %d", result.ExitCode)
+	if status < 200 || status > 299 {
+		return fmt.Errorf("upload the module to %q: unexpected status %d", p.repository, status)
 	}
-	return nil
+	operation, err := decodeUploadOperation(content)
+	if err != nil {
+		return fmt.Errorf("decode the module upload operation: %w", err)
+	}
+	return p.awaitUpload(ctx, operation)
+}
+
+// encodeModuleUpload builds the multipart/related media upload body of the
+// module upload: the empty JSON metadata part followed by the module archive
+// part. The parts are adapter-controlled (static headers and the proven
+// archive content), so construction cannot fail.
+func encodeModuleUpload(archive []byte) ([]byte, string) {
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+
+	meta, _ := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Type": {"application/json"},
+	})
+	_, _ = meta.Write([]byte("{}"))
+
+	blob, _ := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Type":              {"application/zip"},
+		"Content-Transfer-Encoding": {"binary"},
+	})
+	_, _ = blob.Write(archive)
+	_ = writer.Close()
+	return buffer.Bytes(), "multipart/related; boundary=" + writer.Boundary()
+}
+
+// uploadOperationResponse is the upload response carrying the started
+// operation.
+type uploadOperationResponse struct {
+	Operation struct {
+		Name string `json:"name"`
+	} `json:"operation"`
+}
+
+// decodeUploadOperation binds the started operation name from the upload
+// response and fails closed on a malformed or nameless response.
+func decodeUploadOperation(content []byte) (string, error) {
+	var document uploadOperationResponse
+	if err := json.Unmarshal(content, &document); err != nil {
+		return "", err
+	}
+	if document.Operation.Name == "" {
+		return "", errors.New("the module upload response carries no operation name")
+	}
+	return document.Operation.Name, nil
+}
+
+// uploadOperation is the polled state of the upload operation.
+type uploadOperation struct {
+	Done  bool            `json:"done"`
+	Error *operationError `json:"error"`
+}
+
+// operationError is the failure state of a completed upload operation.
+type operationError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// maxUploadPolls bounds the upload operation wait.
+const maxUploadPolls = 120
+
+// pollInterval is the wait between upload operation polls; tests bind a
+// shorter interval.
+var pollInterval = time.Second
+
+// awaitPoll is the wait seam between upload operation polls; tests bind an
+// instant or failing form.
+var awaitPoll = func(ctx context.Context) error {
+	timer := time.NewTimer(pollInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// awaitUpload polls the started upload operation until it completes and fails
+// closed on an operation error or an exhausted poll budget.
+func (p Publisher) awaitUpload(ctx context.Context, name string) error {
+	for i := 0; i < maxUploadPolls; i++ {
+		done, err := p.uploadDone(ctx, name)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		if err := awaitPoll(ctx); err != nil {
+			return fmt.Errorf("wait for the module upload operation: %w", err)
+		}
+	}
+	return fmt.Errorf("the module upload operation %q did not complete within %d polls", name, maxUploadPolls)
+}
+
+// uploadDone reads the current state of the upload operation and fails closed
+// on a read failure or an operation error.
+func (p Publisher) uploadDone(ctx context.Context, name string) (bool, error) {
+	content, status, err := p.client.do(ctx, http.MethodGet, p.client.api+"/v1/"+name, nil, "")
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK {
+		return false, fmt.Errorf("read the module upload operation %q: unexpected status %d", name, status)
+	}
+	var operation uploadOperation
+	if err := json.Unmarshal(content, &operation); err != nil {
+		return false, fmt.Errorf("decode the module upload operation %q: %w", name, err)
+	}
+	if operation.Error != nil {
+		return false, fmt.Errorf("the module upload operation failed: %d %s", operation.Error.Code, operation.Error.Message)
+	}
+	return operation.Done, nil
 }
 
 // extractModule unpacks the module archive under dir with traversal guards
