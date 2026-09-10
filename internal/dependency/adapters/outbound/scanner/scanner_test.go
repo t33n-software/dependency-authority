@@ -68,6 +68,14 @@ func TestNewOSVValidatesConfiguration(t *testing.T) {
 	}
 }
 
+func TestDatabaseSnapshotPath(t *testing.T) {
+	got := DatabaseSnapshotPath("db")
+	want := filepath.Join("db", "osv-scanner", "Go", "all.zip")
+	if got != want {
+		t.Fatalf("DatabaseSnapshotPath() = %q, want %q", got, want)
+	}
+}
+
 func TestScanRejectsEscapingContentPath(t *testing.T) {
 	called := false
 	adapter := newScanner(t, func(context.Context, string, []string, string, ...string) (Result, error) {

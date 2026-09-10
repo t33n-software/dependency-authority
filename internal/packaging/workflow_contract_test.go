@@ -408,7 +408,7 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 		}
 	}
 
-	for _, domain := range []string{"admission", "approval", "candidate", "evidence", "quarantine", "revocation"} {
+	for _, domain := range []string{"admission", "approval", "candidate", "evidence", "quarantine", "revocation", "tooling"} {
 		if _, err := os.Stat(repositoryPath("internal", "dependency", "domain", domain)); err != nil {
 			t.Fatalf("missing domain package %q: %v", domain, err)
 		}
@@ -425,6 +425,7 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 		repositoryPath("internal", "dependency", "adapters", "outbound", "scanner"),
 		repositoryPath("internal", "dependency", "adapters", "outbound", "artifactregistry"),
 		repositoryPath("internal", "dependency", "adapters", "outbound", "evidence"),
+		repositoryPath("internal", "dependency", "adapters", "outbound", "tooling"),
 		repositoryPath("internal", "dependency", "bootstrap"),
 		repositoryPath("test", "contract"),
 		repositoryPath("test", "integration"),

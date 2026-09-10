@@ -318,8 +318,36 @@ func TestRunSuccess(t *testing.T) {
 	}
 }
 
+// stubChannelMaterialization binds a no-op channel materialization seam for
+// the lane runtime tests.
+func stubChannelMaterialization(t *testing.T) {
+	t.Helper()
+	original := runChannelMaterialization
+	t.Cleanup(func() { runChannelMaterialization = original })
+	runChannelMaterialization = func(context.Context, Operation, func(string) string) error {
+		return nil
+	}
+}
+
+func TestRunFailsClosedOnChannelMaterializationError(t *testing.T) {
+	original := runChannelMaterialization
+	t.Cleanup(func() { runChannelMaterialization = original })
+	runChannelMaterialization = func(context.Context, Operation, func(string) string) error {
+		return errors.New("channel unreachable")
+	}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), OperationAdmission, laneEnv("control", operationInputs()), staticPorts(admissionLanePorts(t), nil), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "materialize the workload tooling channel") {
+		t.Fatalf("stderr = %q, want the channel materialization error", stderr.String())
+	}
+}
+
 func TestLaneWrappers(t *testing.T) {
 	stubBundle(t)
+	stubChannelMaterialization(t)
 	lanes := []struct {
 		name  string
 		run   func(context.Context, func(string) string, PortsBuilder, io.Writer, io.Writer) int

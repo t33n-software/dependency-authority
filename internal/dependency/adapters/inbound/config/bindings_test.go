@@ -18,15 +18,16 @@ func TestBindingsFromEnvRejectsNilLookup(t *testing.T) {
 
 func TestBindingsFromEnvBindsEveryValue(t *testing.T) {
 	bindings, err := BindingsFromEnv(bindingsEnv(map[string]string{
-		EnvUpstreamEndpoint:   " https://europe-west3-go.pkg.dev/p/intake ",
-		EnvApprovedEndpoint:   "https://europe-west3-go.pkg.dev/p/approved",
-		EnvArtifactAPI:        "https://artifactregistry.googleapis.com",
-		EnvEvidenceRepository: "projects/p/locations/l/repositories/evidence",
-		EnvApprovedRepository: "projects/p/locations/l/repositories/approved",
-		EnvPolicyBundle:       "policies/go.json",
-		EnvScannerTool:        "tools/osv-scanner",
-		EnvScannerDatabase:    "tools/osv-db",
-		EnvScanContentRoot:    "work/content",
+		EnvUpstreamEndpoint:     " https://europe-west3-go.pkg.dev/p/intake ",
+		EnvApprovedEndpoint:     "https://europe-west3-go.pkg.dev/p/approved",
+		EnvArtifactAPI:          "https://artifactregistry.googleapis.com",
+		EnvEvidenceRepository:   "projects/p/locations/l/repositories/evidence",
+		EnvApprovedRepository:   "projects/p/locations/l/repositories/approved",
+		EnvPolicyBundle:         "policies/go.json",
+		EnvPolicyBundleIdentity: " dependency-policy/v1@sha256:4e165520 ",
+		EnvScannerTool:          "tools/osv-scanner",
+		EnvScannerDatabase:      "tools/osv-db",
+		EnvScanContentRoot:      "work/content",
 	}))
 	if err != nil {
 		t.Fatalf("BindingsFromEnv() error = %v", err)
@@ -36,15 +37,16 @@ func TestBindingsFromEnvBindsEveryValue(t *testing.T) {
 		got  string
 		want string
 	}{
-		"upstream endpoint":   {bindings.UpstreamEndpoint(), "https://europe-west3-go.pkg.dev/p/intake"},
-		"approved endpoint":   {bindings.ApprovedEndpoint(), "https://europe-west3-go.pkg.dev/p/approved"},
-		"artifact api":        {bindings.ArtifactAPI(), "https://artifactregistry.googleapis.com"},
-		"evidence repository": {bindings.EvidenceRepository(), "projects/p/locations/l/repositories/evidence"},
-		"approved repository": {bindings.ApprovedRepository(), "projects/p/locations/l/repositories/approved"},
-		"policy bundle":       {bindings.PolicyBundle(), "policies/go.json"},
-		"scanner tool":        {bindings.ScannerTool(), "tools/osv-scanner"},
-		"scanner database":    {bindings.ScannerDatabase(), "tools/osv-db"},
-		"scan content root":   {bindings.ScanContentRoot(), "work/content"},
+		"upstream endpoint":      {bindings.UpstreamEndpoint(), "https://europe-west3-go.pkg.dev/p/intake"},
+		"approved endpoint":      {bindings.ApprovedEndpoint(), "https://europe-west3-go.pkg.dev/p/approved"},
+		"artifact api":           {bindings.ArtifactAPI(), "https://artifactregistry.googleapis.com"},
+		"evidence repository":    {bindings.EvidenceRepository(), "projects/p/locations/l/repositories/evidence"},
+		"approved repository":    {bindings.ApprovedRepository(), "projects/p/locations/l/repositories/approved"},
+		"policy bundle":          {bindings.PolicyBundle(), "policies/go.json"},
+		"policy bundle identity": {bindings.PolicyBundleIdentity(), "dependency-policy/v1@sha256:4e165520"},
+		"scanner tool":           {bindings.ScannerTool(), "tools/osv-scanner"},
+		"scanner database":       {bindings.ScannerDatabase(), "tools/osv-db"},
+		"scan content root":      {bindings.ScanContentRoot(), "work/content"},
 	} {
 		if got.got != got.want {
 			t.Errorf("%s = %q, want %q", name, got.got, got.want)
@@ -58,15 +60,16 @@ func TestBindingsFromEnvEmptyEnvironment(t *testing.T) {
 		t.Fatalf("BindingsFromEnv() error = %v", err)
 	}
 	for name, got := range map[string]string{
-		"upstream endpoint":   bindings.UpstreamEndpoint(),
-		"approved endpoint":   bindings.ApprovedEndpoint(),
-		"artifact api":        bindings.ArtifactAPI(),
-		"evidence repository": bindings.EvidenceRepository(),
-		"approved repository": bindings.ApprovedRepository(),
-		"policy bundle":       bindings.PolicyBundle(),
-		"scanner tool":        bindings.ScannerTool(),
-		"scanner database":    bindings.ScannerDatabase(),
-		"scan content root":   bindings.ScanContentRoot(),
+		"upstream endpoint":      bindings.UpstreamEndpoint(),
+		"approved endpoint":      bindings.ApprovedEndpoint(),
+		"artifact api":           bindings.ArtifactAPI(),
+		"evidence repository":    bindings.EvidenceRepository(),
+		"approved repository":    bindings.ApprovedRepository(),
+		"policy bundle":          bindings.PolicyBundle(),
+		"policy bundle identity": bindings.PolicyBundleIdentity(),
+		"scanner tool":           bindings.ScannerTool(),
+		"scanner database":       bindings.ScannerDatabase(),
+		"scan content root":      bindings.ScanContentRoot(),
 	} {
 		if got != "" {
 			t.Errorf("%s = %q, want empty", name, got)

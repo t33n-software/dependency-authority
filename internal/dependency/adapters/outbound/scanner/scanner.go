@@ -87,6 +87,13 @@ func (o OSV) Scan(ctx context.Context, subject candidate.Candidate) (admission.S
 	return admission.ScanResult{MaxCVSS: maxSeverity(output), Licenses: nil}, nil
 }
 
+// DatabaseSnapshotPath returns the local snapshot document path within the
+// scanner database directory: the OSV local database cache layout carries the
+// ecosystem export at osv-scanner/Go/all.zip.
+func DatabaseSnapshotPath(database string) string {
+	return filepath.Join(database, "osv-scanner", "Go", "all.zip")
+}
+
 // contentPath binds the candidate identity to its materialization directory
 // and rejects any path that escapes the configured content root.
 func (o OSV) contentPath(subject candidate.Candidate) (string, error) {

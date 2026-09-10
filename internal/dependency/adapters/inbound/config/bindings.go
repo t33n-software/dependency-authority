@@ -18,6 +18,10 @@ const (
 	EnvApprovedRepository = "DEPENDENCY_AUTHORITY_APPROVED_REPOSITORY"
 	// EnvPolicyBundle names the pinned dependency-policy/v1 bundle path.
 	EnvPolicyBundle = "DEPENDENCY_AUTHORITY_POLICY_BUNDLE"
+	// EnvPolicyBundleIdentity names the pinned dependency-policy/v1 bundle
+	// identity: the digest-bound channel reference the bundle content is
+	// proven against at materialization time.
+	EnvPolicyBundleIdentity = "DEPENDENCY_AUTHORITY_POLICY_BUNDLE_IDENTITY"
 	// EnvScannerTool names the pinned scanner tool path.
 	EnvScannerTool = "DEPENDENCY_AUTHORITY_SCANNER_TOOL"
 	// EnvScannerDatabase names the local scanner database snapshot directory.
@@ -31,15 +35,16 @@ const (
 // present value belongs to the adapter constructors, which fail closed on any
 // contract violation.
 type Bindings struct {
-	upstreamEndpoint   string
-	approvedEndpoint   string
-	artifactAPI        string
-	evidenceRepository string
-	approvedRepository string
-	policyBundle       string
-	scannerTool        string
-	scannerDatabase    string
-	scanContentRoot    string
+	upstreamEndpoint     string
+	approvedEndpoint     string
+	artifactAPI          string
+	evidenceRepository   string
+	approvedRepository   string
+	policyBundle         string
+	policyBundleIdentity string
+	scannerTool          string
+	scannerDatabase      string
+	scanContentRoot      string
 }
 
 // BindingsFromEnv loads the adapter bindings from the process environment.
@@ -48,15 +53,16 @@ func BindingsFromEnv(lookup func(string) string) (Bindings, error) {
 		return Bindings{}, errors.New("environment lookup must not be nil")
 	}
 	return Bindings{
-		upstreamEndpoint:   strings.TrimSpace(lookup(EnvUpstreamEndpoint)),
-		approvedEndpoint:   strings.TrimSpace(lookup(EnvApprovedEndpoint)),
-		artifactAPI:        strings.TrimSpace(lookup(EnvArtifactAPI)),
-		evidenceRepository: strings.TrimSpace(lookup(EnvEvidenceRepository)),
-		approvedRepository: strings.TrimSpace(lookup(EnvApprovedRepository)),
-		policyBundle:       strings.TrimSpace(lookup(EnvPolicyBundle)),
-		scannerTool:        strings.TrimSpace(lookup(EnvScannerTool)),
-		scannerDatabase:    strings.TrimSpace(lookup(EnvScannerDatabase)),
-		scanContentRoot:    strings.TrimSpace(lookup(EnvScanContentRoot)),
+		upstreamEndpoint:     strings.TrimSpace(lookup(EnvUpstreamEndpoint)),
+		approvedEndpoint:     strings.TrimSpace(lookup(EnvApprovedEndpoint)),
+		artifactAPI:          strings.TrimSpace(lookup(EnvArtifactAPI)),
+		evidenceRepository:   strings.TrimSpace(lookup(EnvEvidenceRepository)),
+		approvedRepository:   strings.TrimSpace(lookup(EnvApprovedRepository)),
+		policyBundle:         strings.TrimSpace(lookup(EnvPolicyBundle)),
+		policyBundleIdentity: strings.TrimSpace(lookup(EnvPolicyBundleIdentity)),
+		scannerTool:          strings.TrimSpace(lookup(EnvScannerTool)),
+		scannerDatabase:      strings.TrimSpace(lookup(EnvScannerDatabase)),
+		scanContentRoot:      strings.TrimSpace(lookup(EnvScanContentRoot)),
 	}, nil
 }
 
@@ -88,6 +94,11 @@ func (b Bindings) ApprovedRepository() string {
 // PolicyBundle returns the pinned policy bundle path.
 func (b Bindings) PolicyBundle() string {
 	return b.policyBundle
+}
+
+// PolicyBundleIdentity returns the pinned policy bundle channel identity.
+func (b Bindings) PolicyBundleIdentity() string {
+	return b.policyBundleIdentity
 }
 
 // ScannerTool returns the pinned scanner tool path.

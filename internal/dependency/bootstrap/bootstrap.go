@@ -1,8 +1,10 @@
 // Package bootstrap wires the dependency authority lane controllers and runs
 // their execution contract: each controller binds its outbound ports from the
-// lane environment, loads its validated operation inputs, and executes its
-// lane use case with the bound adapters. A controller with unbound ports or
-// invalid inputs fails closed and never executes its lane partially.
+// lane environment, loads its validated operation inputs, materializes the
+// pinned workload tooling channel objects the lane consumes, and executes its
+// lane use case with the bound adapters. A controller with unbound ports,
+// invalid inputs, or an unprovable tooling channel fails closed and never
+// executes its lane partially.
 package bootstrap
 
 import (
@@ -94,6 +96,10 @@ func run(ctx context.Context, operation Operation, lookup func(string) string, b
 	operationInput, err := config.OperationFromEnv(lookup, operationFields(operation)...)
 	if err != nil {
 		fmt.Fprintln(stderr, "load operation inputs:", err)
+		return 2
+	}
+	if err := runChannelMaterialization(ctx, operation, lookup); err != nil {
+		fmt.Fprintln(stderr, "materialize the workload tooling channel:", err)
 		return 2
 	}
 	if err := execute(ctx, operation, service, ports, controllerConfig, operationInput, lookup, stdout); err != nil {
