@@ -64,6 +64,13 @@ func PortsFromEnv(lookup func(string) string) (Ports, error) {
 		if err != nil {
 			return Ports{}, fmt.Errorf("bind artifact registry transport: %w", err)
 		}
+		if bindings.UpstreamEndpoint() != "" && bindings.ScanContentRoot() != "" {
+			// The upstream endpoint was validated by the upstream adapter
+			// binding above and the content root is non-empty by the guard, so
+			// this construction is total.
+			content, _ := artifactregistry.NewCandidateContent(client, bindings.UpstreamEndpoint(), bindings.ScanContentRoot())
+			ports.Content = content
+		}
 		if bindings.EvidenceRepository() != "" {
 			records, err := artifactregistry.NewRecords(client, bindings.EvidenceRepository(), time.Now)
 			if err != nil {

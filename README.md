@@ -69,8 +69,11 @@ implement the consumer-defined ports:
   for vulnerabilities without a computable vector;
 - `artifactregistry`: the append-only candidate records store
   (`Candidates`), the approved-zone publisher with the dirhash
-  content-identity proof (`promotion.ApprovedRegistry`), and the
-  package-scoped download-rule revocation gate (`revocation.DownloadGate`);
+  content-identity proof (`promotion.ApprovedRegistry`), the
+  package-scoped download-rule revocation gate (`revocation.DownloadGate`),
+  and the candidate content materialization that fetches the module archive
+  from the controlled intake boundary, proves it against the recorded
+  candidate digest, and places it at the canonical content path for the scan;
 - `evidence`: the append-only evidence reference index
   (`admission.EvidenceStore`, `revocation.EvidenceRecorder`);
 - `tooling`: the read-only workload tooling channel consumer — at startup the
@@ -109,7 +112,14 @@ inputs (`DEPENDENCY_AUTHORITY_SCANNER_IDENTITY`,
 through `DEPENDENCY_AUTHORITY_POLICY_BUNDLE_IDENTITY`, and the materialized
 content lands at the bound `DEPENDENCY_AUTHORITY_SCANNER_TOOL`,
 `DEPENDENCY_AUTHORITY_SCANNER_DATABASE`, and `DEPENDENCY_AUTHORITY_POLICY_BUNDLE`
-paths.
+paths. Before the scan, the admission and revalidation lanes materialize the
+candidate content from the controlled intake boundary into the scan content
+root: the fetched archive is proven against the digest the candidate record
+binds, placed atomically, and never overwritten with differing content. The
+scan and decision evidence carry only the channel identities proven against
+the materialized artifacts — the tool and database identities are re-proven
+against the materialized content at evidence time, and the policy identity is
+derived from the materialized bundle content — never an asserted input.
 
 The controllers authenticate to the trust-zone APIs through the identity
 attached to the workload: each controller obtains short-lived access tokens at
@@ -130,13 +140,15 @@ revocation lane additionally takes `reason`), federates its
 environment-scoped workload identity, builds the lane controller, and
 executes the lane use case with the adapters bound from the environment: the
 intake lane registers the pending candidate from the controlled upstream
-digest, the admission lane scans the candidate, records the scan and decision
-evidence with the pinned tool and policy identities, and records the
-automatic time-bounded approval on a policy pass, the promotion lane promotes
-under the newest recorded, still valid approval, the revalidation lane
-re-evaluates approved candidates and records the fresh scan and decision
-evidence, and the revocation lane blocks downloads at the approved boundary
-and records the revocation evidence. The intake lane additionally probes the
+digest, the admission lane materializes the candidate content from the
+controlled intake boundary (proven against the recorded digest), scans it,
+records the scan and decision evidence with the artifact-proven pinned tool
+and policy identities, and records the automatic time-bounded approval on a
+policy pass, the promotion lane promotes under the newest recorded, still
+valid approval, the revalidation lane materializes the candidate content,
+re-evaluates approved candidates, and records the fresh scan and decision
+evidence with the artifact-proven identities, and the revocation lane blocks
+downloads at the approved boundary and records the revocation evidence. The intake lane additionally probes the
 controlled intake boundary with a bounded read. The workflows carry no
 organization value — every concrete binding arrives through environment
 variables set on the protected environments.

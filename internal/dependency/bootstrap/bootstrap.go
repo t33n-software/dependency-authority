@@ -45,6 +45,7 @@ type Ports struct {
 	Gate          revocation.DownloadGate
 	Recorder      revocation.EvidenceRecorder
 	Journal       EvidenceJournal
+	Content       CandidateContent
 	Now           func() time.Time
 }
 

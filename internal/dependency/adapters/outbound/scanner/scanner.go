@@ -67,7 +67,7 @@ func NewOSV(tool string, database string, contentRoot string, run Runner) (OSV, 
 // and reduces the findings to the admission scan result. License findings are
 // not produced here; policy evaluation owns them (ADR-0002).
 func (o OSV) Scan(ctx context.Context, subject candidate.Candidate) (admission.ScanResult, error) {
-	dir, err := o.contentPath(subject)
+	dir, err := subject.ContentPath(o.contentRoot)
 	if err != nil {
 		return admission.ScanResult{}, err
 	}
@@ -92,18 +92,6 @@ func (o OSV) Scan(ctx context.Context, subject candidate.Candidate) (admission.S
 // ecosystem export at osv-scanner/Go/all.zip.
 func DatabaseSnapshotPath(database string) string {
 	return filepath.Join(database, "osv-scanner", "Go", "all.zip")
-}
-
-// contentPath binds the candidate identity to its materialization directory
-// and rejects any path that escapes the configured content root.
-func (o OSV) contentPath(subject candidate.Candidate) (string, error) {
-	root := filepath.Clean(o.contentRoot)
-	relative := filepath.Join(string(subject.Ecosystem()), filepath.FromSlash(subject.Name())+"@"+subject.Version())
-	full := filepath.Join(root, relative)
-	if full != root && !strings.HasPrefix(full, root+string(os.PathSeparator)) {
-		return "", fmt.Errorf("candidate content path %q escapes the materialization root", full)
-	}
-	return full, nil
 }
 
 // scanOutput mirrors the OSV-Scanner JSON result document.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/policy"
+	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/scanner"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
@@ -22,6 +23,7 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/approval"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
+	domaintooling "github.com/t33n-software/dependency-authority/internal/dependency/domain/tooling"
 )
 
 // Evidence schema versions of the lane-produced evidence documents.
@@ -37,6 +39,14 @@ const (
 type EvidenceJournal interface {
 	Put(ctx context.Context, subject candidate.Candidate, evidenceType evidence.Type, issuer string, payload []byte, issuedAt time.Time, expiresAt *time.Time) (evidence.Reference, error)
 	Record(ctx context.Context, subject candidate.Candidate, reference evidence.Reference) error
+}
+
+// CandidateContent is the candidate content materialization capability the
+// scanning lanes orchestrate: the candidate module content is fetched from the
+// controlled boundary, proven against the recorded digest, and placed at the
+// canonical content path before any scan runs.
+type CandidateContent interface {
+	Materialize(ctx context.Context, subject candidate.Candidate) (string, error)
 }
 
 // readBundle loads the policy bundle content; os.ReadFile in production.
@@ -113,6 +123,27 @@ func executeAdmission(ctx context.Context, service admission.Service, ports Port
 		return fmt.Errorf("candidate %s %s not found: run the intake lane first", name, version)
 	}
 
+	// The scan reads the materialized candidate content; the lane fails closed
+	// before any scan when the content cannot be proven and placed.
+	content, err := contentOf(ports)
+	if err != nil {
+		return err
+	}
+	if _, err := content.Materialize(ctx, current); err != nil {
+		return fmt.Errorf("materialize candidate content: %w", err)
+	}
+
+	// The scan evidence carries only the channel identities proven against the
+	// materialized artifacts, never the asserted operation inputs.
+	toolIdentity, err := provenScannerIdentity(operationInput, lookup)
+	if err != nil {
+		return err
+	}
+	databaseIdentity, err := provenScannerDatabaseIdentity(operationInput, lookup)
+	if err != nil {
+		return err
+	}
+
 	// The lane scans the candidate for the evidence record; the use case
 	// re-evaluates the same deterministic offline scan against the policy.
 	scan, err := ports.Scanner.Scan(ctx, current)
@@ -120,7 +151,7 @@ func executeAdmission(ctx context.Context, service admission.Service, ports Port
 		return fmt.Errorf("scan candidate: %w", err)
 	}
 	now := ports.Now()
-	if _, err := produceEvidence(ctx, journal, current, evidence.TypeScan, operationInput.ScannerIdentity(), scanEvidence(ecosystem, name, version, operationInput, scan, now), now, nil); err != nil {
+	if _, err := produceEvidence(ctx, journal, current, evidence.TypeScan, toolIdentity, scanEvidence(ecosystem, name, version, toolIdentity, databaseIdentity, scan, now), now, nil); err != nil {
 		return err
 	}
 
@@ -200,12 +231,33 @@ func executeRevalidation(ctx context.Context, service revalidation.Service, port
 		return fmt.Errorf("candidate %s %s not found", name, version)
 	}
 
+	// The scan reads the materialized candidate content; the lane fails closed
+	// before any scan when the content cannot be proven and placed.
+	content, err := contentOf(ports)
+	if err != nil {
+		return err
+	}
+	if _, err := content.Materialize(ctx, current); err != nil {
+		return fmt.Errorf("materialize candidate content: %w", err)
+	}
+
+	// The scan evidence carries only the channel identities proven against the
+	// materialized artifacts, never the asserted operation inputs.
+	toolIdentity, err := provenScannerIdentity(operationInput, lookup)
+	if err != nil {
+		return err
+	}
+	databaseIdentity, err := provenScannerDatabaseIdentity(operationInput, lookup)
+	if err != nil {
+		return err
+	}
+
 	scan, err := ports.Scanner.Scan(ctx, current)
 	if err != nil {
 		return fmt.Errorf("scan candidate: %w", err)
 	}
 	now := ports.Now()
-	if _, err := produceEvidence(ctx, journal, current, evidence.TypeScan, operationInput.ScannerIdentity(), scanEvidence(ecosystem, name, version, operationInput, scan, now), now, nil); err != nil {
+	if _, err := produceEvidence(ctx, journal, current, evidence.TypeScan, toolIdentity, scanEvidence(ecosystem, name, version, toolIdentity, databaseIdentity, scan, now), now, nil); err != nil {
 		return err
 	}
 
@@ -267,6 +319,14 @@ func journalOf(ports Ports) (EvidenceJournal, error) {
 	return ports.Journal, nil
 }
 
+// contentOf binds the candidate content port or fails closed.
+func contentOf(ports Ports) (CandidateContent, error) {
+	if ports.Content == nil {
+		return nil, errors.New("candidate content port is not bound")
+	}
+	return ports.Content, nil
+}
+
 // produceEvidence publishes the evidence payload content-addressed and
 // indexes its reference in the candidate evidence trail.
 func produceEvidence(ctx context.Context, journal EvidenceJournal, subject candidate.Candidate, evidenceType evidence.Type, issuer string, payload []byte, now time.Time, expiresAt *time.Time) (evidence.Reference, error) {
@@ -319,6 +379,55 @@ func policyIdentity(lookup func(string) string) (string, error) {
 	return policy.SchemaID + "@sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+// readArtifact is the artifact read seam of the channel identity proof;
+// os.ReadFile in production.
+var readArtifact = os.ReadFile
+
+// proveChannelIdentity proves the bound channel identity against the content
+// of the materialized artifact and returns the identity for the evidence
+// record. The evidence never carries an identity that was not proven against
+// the fetched artifact.
+func proveChannelIdentity(identity domaintooling.Identity, path string) (string, error) {
+	content, err := readArtifact(path)
+	if err != nil {
+		return "", fmt.Errorf("read the materialized channel artifact: %w", err)
+	}
+	sum := sha256.Sum256(content)
+	if digest := "sha256:" + hex.EncodeToString(sum[:]); digest != identity.Digest() {
+		return "", fmt.Errorf("materialized channel artifact %q digest %q does not match the bound identity %q", path, digest, identity.Digest())
+	}
+	return identity.String(), nil
+}
+
+// provenScannerIdentity binds the pinned scanner tool identity of the
+// operation input and proves it against the materialized tool content.
+func provenScannerIdentity(operationInput config.Operation, lookup func(string) string) (string, error) {
+	identity, err := domaintooling.ParseTool(operationInput.ScannerIdentity())
+	if err != nil {
+		return "", fmt.Errorf("bind %s: %w", config.EnvScannerIdentity, err)
+	}
+	bindings, err := config.BindingsFromEnv(lookup)
+	if err != nil {
+		return "", err
+	}
+	return proveChannelIdentity(identity, bindings.ScannerTool())
+}
+
+// provenScannerDatabaseIdentity binds the pinned scanner database snapshot
+// identity of the operation input and proves it against the materialized
+// snapshot content.
+func provenScannerDatabaseIdentity(operationInput config.Operation, lookup func(string) string) (string, error) {
+	identity, err := domaintooling.ParseDatabase(operationInput.ScannerDatabaseIdentity())
+	if err != nil {
+		return "", fmt.Errorf("bind %s: %w", config.EnvScannerDatabaseIdentity, err)
+	}
+	bindings, err := config.BindingsFromEnv(lookup)
+	if err != nil {
+		return "", err
+	}
+	return proveChannelIdentity(identity, scanner.DatabaseSnapshotPath(bindings.ScannerDatabase()))
+}
+
 // scanEvidenceDocument is the canonical scan evidence document.
 type scanEvidenceDocument struct {
 	Schema    string   `json:"schema"`
@@ -333,7 +442,9 @@ type scanEvidenceDocument struct {
 }
 
 // scanEvidence builds the canonical scan evidence document of one lane scan.
-func scanEvidence(ecosystem candidate.Ecosystem, name string, version string, operationInput config.Operation, scan domainadmission.ScanResult, now time.Time) []byte {
+// The tool and database identities are the channel identities proven against
+// the materialized artifacts, never asserted inputs.
+func scanEvidence(ecosystem candidate.Ecosystem, name string, version string, toolIdentity string, databaseIdentity string, scan domainadmission.ScanResult, now time.Time) []byte {
 	licenses := scan.Licenses
 	if licenses == nil {
 		licenses = []string{}
@@ -345,8 +456,8 @@ func scanEvidence(ecosystem candidate.Ecosystem, name string, version string, op
 		Ecosystem: string(ecosystem),
 		Name:      name,
 		Version:   version,
-		Tool:      operationInput.ScannerIdentity(),
-		Database:  operationInput.ScannerDatabaseIdentity(),
+		Tool:      toolIdentity,
+		Database:  databaseIdentity,
 		MaxCVSS:   scan.MaxCVSS,
 		Licenses:  licenses,
 		IssuedAt:  now.UTC().Format(time.RFC3339Nano),

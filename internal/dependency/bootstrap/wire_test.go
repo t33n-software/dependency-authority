@@ -98,7 +98,7 @@ func TestPortsFromEnvBindsTheArtifactSurface(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PortsFromEnv() error = %v", err)
 		}
-		if ports.Candidates != nil || ports.EvidenceStore != nil || ports.Recorder != nil || ports.Gate != nil || ports.Registry != nil {
+		if ports.Candidates != nil || ports.EvidenceStore != nil || ports.Recorder != nil || ports.Gate != nil || ports.Registry != nil || ports.Content != nil {
 			t.Fatal("PortsFromEnv() bound a store without its repository contract")
 		}
 	})
@@ -164,11 +164,54 @@ func TestPortsFromEnvBindsTheFullLaneEnvironment(t *testing.T) {
 		"registry":       ports.Registry,
 		"gate":           ports.Gate,
 		"recorder":       ports.Recorder,
+		"content":        ports.Content,
 	} {
 		if port == nil {
 			t.Errorf("PortsFromEnv() left %s unbound on the full contract", name)
 		}
 	}
+}
+
+func TestPortsFromEnvBindsTheCandidateContent(t *testing.T) {
+	t.Run("bound with the upstream endpoint and the content root", func(t *testing.T) {
+		ports, err := PortsFromEnv(envBinding(map[string]string{
+			config.EnvArtifactAPI:      "https://artifactregistry.googleapis.com",
+			config.EnvUpstreamEndpoint: "https://europe-west3-go.pkg.dev/p/r",
+			config.EnvScanContentRoot:  "work/content",
+		}))
+		if err != nil {
+			t.Fatalf("PortsFromEnv() error = %v", err)
+		}
+		if ports.Content == nil {
+			t.Fatal("PortsFromEnv() left the candidate content unbound on the complete contract")
+		}
+	})
+
+	t.Run("unbound without the content root", func(t *testing.T) {
+		ports, err := PortsFromEnv(envBinding(map[string]string{
+			config.EnvArtifactAPI:      "https://artifactregistry.googleapis.com",
+			config.EnvUpstreamEndpoint: "https://europe-west3-go.pkg.dev/p/r",
+		}))
+		if err != nil {
+			t.Fatalf("PortsFromEnv() error = %v", err)
+		}
+		if ports.Content != nil {
+			t.Fatal("PortsFromEnv() bound the candidate content without the content root")
+		}
+	})
+
+	t.Run("unbound without the artifact api", func(t *testing.T) {
+		ports, err := PortsFromEnv(envBinding(map[string]string{
+			config.EnvUpstreamEndpoint: "https://europe-west3-go.pkg.dev/p/r",
+			config.EnvScanContentRoot:  "work/content",
+		}))
+		if err != nil {
+			t.Fatalf("PortsFromEnv() error = %v", err)
+		}
+		if ports.Content != nil {
+			t.Fatal("PortsFromEnv() bound the candidate content without the artifact api")
+		}
+	})
 }
 
 func TestPortsFromEnvPropagatesAdapterValidation(t *testing.T) {

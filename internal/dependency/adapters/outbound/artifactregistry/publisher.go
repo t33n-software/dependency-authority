@@ -93,7 +93,7 @@ func (p Publisher) Publish(ctx context.Context, subject candidate.Candidate, _ [
 	if err != nil {
 		return err
 	}
-	if digest := "sha256:" + hex.EncodeToString(sha256Sum(intakeArchive)); digest != subject.Digest() {
+	if digest := archiveDigest(intakeArchive); digest != subject.Digest() {
 		return fmt.Errorf("intake content digest %q drifted from the candidate digest %q before publication", digest, subject.Digest())
 	}
 
@@ -133,18 +133,30 @@ func (p Publisher) Publish(ctx context.Context, subject candidate.Candidate, _ [
 // fetchArchive downloads the module archive through the bound Go proxy
 // endpoint of the given zone.
 func (p Publisher) fetchArchive(ctx context.Context, endpoint *url.URL, subject candidate.Candidate) ([]byte, error) {
-	requestURL := strings.TrimRight(endpoint.String(), "/") + "/" + escapeModulePath(subject.Name()) + "/@v/" + escapeModulePath(subject.Version()) + ".zip"
-	content, status, err := p.client.do(ctx, http.MethodGet, requestURL, nil, "")
+	return fetchModuleArchive(ctx, p.client, endpoint, subject.Name(), subject.Version())
+}
+
+// fetchModuleArchive downloads the module archive through the bound Go proxy
+// endpoint of a trust zone.
+func fetchModuleArchive(ctx context.Context, client Client, endpoint *url.URL, name string, version string) ([]byte, error) {
+	requestURL := strings.TrimRight(endpoint.String(), "/") + "/" + escapeModulePath(name) + "/@v/" + escapeModulePath(version) + ".zip"
+	content, status, err := client.do(ctx, http.MethodGet, requestURL, nil, "")
 	if err != nil {
 		return nil, err
 	}
 	if status == http.StatusNotFound || status == http.StatusGone {
-		return nil, fmt.Errorf("module archive %s %s not found at %q", subject.Name(), subject.Version(), endpoint.Host)
+		return nil, fmt.Errorf("module archive %s %s not found at %q", name, version, endpoint.Host)
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("fetch module archive from %q: unexpected status %d", endpoint.Host, status)
 	}
 	return content, nil
+}
+
+// archiveDigest computes the canonical sha256 reference digest of the module
+// archive content.
+func archiveDigest(content []byte) string {
+	return "sha256:" + hex.EncodeToString(sha256Sum(content))
 }
 
 // materialize extracts the module archive into a fresh temporary directory

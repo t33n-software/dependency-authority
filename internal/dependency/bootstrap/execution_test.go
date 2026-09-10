@@ -5,7 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +23,7 @@ import (
 	domainadmission "github.com/t33n-software/dependency-authority/internal/dependency/domain/admission"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
+	domaintooling "github.com/t33n-software/dependency-authority/internal/dependency/domain/tooling"
 )
 
 func stubBundle(t *testing.T) {
@@ -54,7 +58,10 @@ func intakeConfig(t *testing.T) config.Config {
 
 func laneOperation(t *testing.T, fields ...config.Field) config.Operation {
 	t.Helper()
-	operation, err := config.OperationFromEnv(laneEnv("control", operationInputs()), fields...)
+	// The operation inputs and the artifact bindings share the fixed fixture
+	// content, so the channel identities the operation carries always match
+	// the digests of the materialized artifacts.
+	operation, err := config.OperationFromEnv(laneEnv("control", mergedLaneValues(t)), fields...)
 	if err != nil {
 		t.Fatalf("OperationFromEnv() error = %v", err)
 	}
@@ -149,7 +156,8 @@ func TestExecuteAdmissionRecordsTheEvidenceChain(t *testing.T) {
 	ports := admissionLanePorts(t)
 	journal := journalOfPorts(t, ports)
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	values := mergedLaneValues(t)
+	lookup := laneEnv("control", values)
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -160,8 +168,18 @@ func TestExecuteAdmissionRecordsTheEvidenceChain(t *testing.T) {
 	if len(journal.puts) != 3 {
 		t.Fatalf("journal puts = %d, want scan, decision, and approval evidence", len(journal.puts))
 	}
-	if journal.puts[0].Type() != evidence.TypeScan || journal.puts[0].Issuer() != "osv-scanner 2.2.3" {
-		t.Fatalf("scan evidence = %q issued by %q", journal.puts[0].Type(), journal.puts[0].Issuer())
+	if journal.puts[0].Type() != evidence.TypeScan || journal.puts[0].Issuer() != values[config.EnvScannerIdentity] {
+		t.Fatalf("scan evidence = %q issued by %q, want the proven tool identity", journal.puts[0].Type(), journal.puts[0].Issuer())
+	}
+	var scanDocument struct {
+		Tool     string `json:"tool"`
+		Database string `json:"database"`
+	}
+	if err := json.Unmarshal(journal.payloads[0], &scanDocument); err != nil {
+		t.Fatalf("the scan evidence payload is not decodable: %v", err)
+	}
+	if scanDocument.Tool != values[config.EnvScannerIdentity] || scanDocument.Database != values[config.EnvScannerDatabaseIdentity] {
+		t.Fatalf("the scan evidence carries tool %q and database %q, want the proven channel identities", scanDocument.Tool, scanDocument.Database)
 	}
 	if journal.puts[1].Type() != evidence.TypePolicy || !strings.HasPrefix(journal.puts[1].Issuer(), policy.SchemaID+"@sha256:") {
 		t.Fatalf("decision evidence = %q issued by %q", journal.puts[1].Type(), journal.puts[1].Issuer())
@@ -189,7 +207,7 @@ func TestExecuteAdmissionQuarantineRecordsNoApproval(t *testing.T) {
 	journal := journalOfPorts(t, ports)
 	candidates := ports.Candidates.(*fakeCandidates)
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -214,7 +232,7 @@ func TestExecuteAdmissionFailsClosedOnThePolicyIdentity(t *testing.T) {
 
 	ports := admissionLanePorts(t)
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -228,7 +246,7 @@ func TestExecuteAdmissionFailsClosedWithoutTheJournal(t *testing.T) {
 	ports := admissionLanePorts(t)
 	ports.Journal = nil
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -242,7 +260,7 @@ func TestExecuteAdmissionFailsClosedOnTheCandidateLoad(t *testing.T) {
 	ports := admissionLanePorts(t)
 	ports.Candidates = &fakeCandidates{findErr: errors.New("records unavailable")}
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -256,7 +274,7 @@ func TestExecuteAdmissionFailsClosedOnAnUnknownCandidate(t *testing.T) {
 	ports := admissionLanePorts(t)
 	ports.Candidates = &fakeCandidates{found: false}
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -270,7 +288,7 @@ func TestExecuteAdmissionFailsClosedOnTheScan(t *testing.T) {
 	ports := admissionLanePorts(t)
 	ports.Scanner = fakeScanner{err: errors.New("scanner failed")}
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -285,7 +303,7 @@ func TestExecuteAdmissionFailsClosedOnTheScanEvidence(t *testing.T) {
 	journal := journalOfPorts(t, ports)
 	journal.failOnPut = 1
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -300,7 +318,7 @@ func TestExecuteAdmissionFailsClosedOnTheScanEvidenceIndex(t *testing.T) {
 	journal := journalOfPorts(t, ports)
 	journal.failOnRecord = 1
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -315,7 +333,7 @@ func TestExecuteAdmissionFailsClosedOnTheDecision(t *testing.T) {
 	ports.Policies = fakePolicies{err: errors.New("bundle unreadable")}
 	journal := journalOfPorts(t, ports)
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -333,7 +351,7 @@ func TestExecuteAdmissionFailsClosedOnTheDecisionEvidence(t *testing.T) {
 	journal := journalOfPorts(t, ports)
 	journal.failOnPut = 2
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
@@ -348,12 +366,105 @@ func TestExecuteAdmissionFailsClosedOnTheApprovalEvidence(t *testing.T) {
 	journal := journalOfPorts(t, ports)
 	journal.failOnPut = 3
 	service := laneService(t, OperationAdmission, ports).(admission.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
 	if err == nil || !strings.Contains(err.Error(), "publish approval evidence") {
 		t.Fatalf("executeAdmission() error = %v, want the approval evidence failure", err)
+	}
+}
+
+func TestExecuteAdmissionMaterializesTheCandidateBeforeScanning(t *testing.T) {
+	stubBundle(t)
+	var events []string
+	ports := admissionLanePorts(t)
+	ports.Content = &fakeCandidateContent{events: &events}
+	ports.Scanner = scannerFunc(func(context.Context, candidate.Candidate) (domainadmission.ScanResult, error) {
+		events = append(events, "scan")
+		return domainadmission.ScanResult{}, nil
+	})
+	service := laneService(t, OperationAdmission, ports).(admission.Service)
+	lookup := laneEnv("control", mergedLaneValues(t))
+
+	var stdout bytes.Buffer
+	if err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout); err != nil {
+		t.Fatalf("executeAdmission() error = %v", err)
+	}
+	if len(events) != 3 || events[0] != "materialize" || events[1] != "scan" || events[2] != "scan" {
+		t.Fatalf("events = %v, want the materialization before the evidence and policy scans", events)
+	}
+}
+
+func TestExecuteAdmissionFailsClosedWithoutTheContentPort(t *testing.T) {
+	stubBundle(t)
+	ports := admissionLanePorts(t)
+	ports.Content = nil
+	service := laneService(t, OperationAdmission, ports).(admission.Service)
+	lookup := laneEnv("control", mergedLaneValues(t))
+
+	var stdout bytes.Buffer
+	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), "candidate content port is not bound") {
+		t.Fatalf("executeAdmission() error = %v, want the content port guard", err)
+	}
+}
+
+func TestExecuteAdmissionFailsClosedOnTheContentMaterialization(t *testing.T) {
+	stubBundle(t)
+	ports := admissionLanePorts(t)
+	ports.Content = &fakeCandidateContent{err: errors.New("intake unavailable")}
+	service := laneService(t, OperationAdmission, ports).(admission.Service)
+	lookup := laneEnv("control", mergedLaneValues(t))
+
+	var stdout bytes.Buffer
+	err := executeAdmission(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL), lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), "materialize candidate content") {
+		t.Fatalf("executeAdmission() error = %v, want the materialization failure", err)
+	}
+}
+
+func TestExecuteAdmissionFailsClosedOnTheScannerIdentityProof(t *testing.T) {
+	stubBundle(t)
+	ports := admissionLanePorts(t)
+	service := laneService(t, OperationAdmission, ports).(admission.Service)
+	values := mergedLaneValues(t)
+	// The retired free-text form is not a bound channel identity.
+	values[config.EnvScannerIdentity] = "osv-scanner 2.2.3"
+	lookup := laneEnv("control", values)
+	// The operation and the bindings share the lane environment in production;
+	// the test binds both to the overridden form.
+	operation, err := config.OperationFromEnv(lookup, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err = executeAdmission(context.Background(), service, ports, controlConfig(t), operation, lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), config.EnvScannerIdentity) {
+		t.Fatalf("executeAdmission() error = %v, want the scanner identity failure", err)
+	}
+}
+
+func TestExecuteAdmissionFailsClosedOnTheScannerDatabaseIdentityProof(t *testing.T) {
+	stubBundle(t)
+	ports := admissionLanePorts(t)
+	service := laneService(t, OperationAdmission, ports).(admission.Service)
+	values := mergedLaneValues(t)
+	// The retired free-text form is not a bound channel identity.
+	values[config.EnvScannerDatabaseIdentity] = "osv-db sha256:aaa"
+	lookup := laneEnv("control", values)
+	// The operation and the bindings share the lane environment in production;
+	// the test binds both to the overridden form.
+	operation, err := config.OperationFromEnv(lookup, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity, config.FieldApprovalTTL)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err = executeAdmission(context.Background(), service, ports, controlConfig(t), operation, lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), config.EnvScannerDatabaseIdentity) {
+		t.Fatalf("executeAdmission() error = %v, want the scanner database identity failure", err)
 	}
 }
 
@@ -450,7 +561,7 @@ func TestExecuteRevalidationRecordsTheFreshEvidence(t *testing.T) {
 	ports := revalidationLanePorts(t)
 	journal := journalOfPorts(t, ports)
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -474,7 +585,7 @@ func TestExecuteRevalidationQuarantinesOnPolicyChange(t *testing.T) {
 	ports.Scanner = fakeScanner{result: domainadmission.ScanResult{MaxCVSS: 9.8}}
 	candidates := ports.Candidates.(*fakeCandidates)
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -494,7 +605,7 @@ func TestExecuteRevalidationFailsClosedWithoutTheJournal(t *testing.T) {
 	ports := revalidationLanePorts(t)
 	ports.Journal = nil
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -510,7 +621,7 @@ func TestExecuteRevalidationFailsClosedOnThePolicyIdentity(t *testing.T) {
 
 	ports := revalidationLanePorts(t)
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -524,7 +635,7 @@ func TestExecuteRevalidationFailsClosedOnTheCandidateLoad(t *testing.T) {
 	ports := revalidationLanePorts(t)
 	ports.Candidates = &fakeCandidates{findErr: errors.New("records unavailable")}
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -538,7 +649,7 @@ func TestExecuteRevalidationFailsClosedOnAnUnknownCandidate(t *testing.T) {
 	ports := revalidationLanePorts(t)
 	ports.Candidates = &fakeCandidates{found: false}
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -552,7 +663,7 @@ func TestExecuteRevalidationFailsClosedOnTheScan(t *testing.T) {
 	ports := revalidationLanePorts(t)
 	ports.Scanner = fakeScanner{err: errors.New("scanner failed")}
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -567,7 +678,7 @@ func TestExecuteRevalidationFailsClosedOnTheScanEvidence(t *testing.T) {
 	journal := journalOfPorts(t, ports)
 	journal.failOnPut = 1
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -581,7 +692,7 @@ func TestExecuteRevalidationFailsClosedOnTheDecision(t *testing.T) {
 	ports := revalidationLanePorts(t)
 	ports.Policies = fakePolicies{err: errors.New("bundle unreadable")}
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
@@ -596,12 +707,105 @@ func TestExecuteRevalidationFailsClosedOnTheDecisionEvidence(t *testing.T) {
 	journal := journalOfPorts(t, ports)
 	journal.failOnPut = 2
 	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 
 	var stdout bytes.Buffer
 	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
 	if err == nil || !strings.Contains(err.Error(), "publish policy evidence") {
 		t.Fatalf("executeRevalidation() error = %v, want the decision evidence failure", err)
+	}
+}
+
+func TestExecuteRevalidationMaterializesTheCandidateBeforeScanning(t *testing.T) {
+	stubBundle(t)
+	var events []string
+	ports := revalidationLanePorts(t)
+	ports.Content = &fakeCandidateContent{events: &events}
+	ports.Scanner = scannerFunc(func(context.Context, candidate.Candidate) (domainadmission.ScanResult, error) {
+		events = append(events, "scan")
+		return domainadmission.ScanResult{}, nil
+	})
+	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
+	lookup := laneEnv("control", mergedLaneValues(t))
+
+	var stdout bytes.Buffer
+	if err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout); err != nil {
+		t.Fatalf("executeRevalidation() error = %v", err)
+	}
+	if len(events) != 3 || events[0] != "materialize" || events[1] != "scan" || events[2] != "scan" {
+		t.Fatalf("events = %v, want the materialization before the evidence and policy scans", events)
+	}
+}
+
+func TestExecuteRevalidationFailsClosedWithoutTheContentPort(t *testing.T) {
+	stubBundle(t)
+	ports := revalidationLanePorts(t)
+	ports.Content = nil
+	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
+	lookup := laneEnv("control", mergedLaneValues(t))
+
+	var stdout bytes.Buffer
+	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), "candidate content port is not bound") {
+		t.Fatalf("executeRevalidation() error = %v, want the content port guard", err)
+	}
+}
+
+func TestExecuteRevalidationFailsClosedOnTheContentMaterialization(t *testing.T) {
+	stubBundle(t)
+	ports := revalidationLanePorts(t)
+	ports.Content = &fakeCandidateContent{err: errors.New("intake unavailable")}
+	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
+	lookup := laneEnv("control", mergedLaneValues(t))
+
+	var stdout bytes.Buffer
+	err := executeRevalidation(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity), lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), "materialize candidate content") {
+		t.Fatalf("executeRevalidation() error = %v, want the materialization failure", err)
+	}
+}
+
+func TestExecuteRevalidationFailsClosedOnTheScannerIdentityProof(t *testing.T) {
+	stubBundle(t)
+	ports := revalidationLanePorts(t)
+	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
+	values := mergedLaneValues(t)
+	// The retired free-text form is not a bound channel identity.
+	values[config.EnvScannerIdentity] = "osv-scanner 2.2.3"
+	lookup := laneEnv("control", values)
+	// The operation and the bindings share the lane environment in production;
+	// the test binds both to the overridden form.
+	operation, err := config.OperationFromEnv(lookup, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err = executeRevalidation(context.Background(), service, ports, controlConfig(t), operation, lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), config.EnvScannerIdentity) {
+		t.Fatalf("executeRevalidation() error = %v, want the scanner identity failure", err)
+	}
+}
+
+func TestExecuteRevalidationFailsClosedOnTheScannerDatabaseIdentityProof(t *testing.T) {
+	stubBundle(t)
+	ports := revalidationLanePorts(t)
+	service := laneService(t, OperationRevalidation, ports).(revalidation.Service)
+	values := mergedLaneValues(t)
+	// The retired free-text form is not a bound channel identity.
+	values[config.EnvScannerDatabaseIdentity] = "osv-db sha256:aaa"
+	lookup := laneEnv("control", values)
+	// The operation and the bindings share the lane environment in production;
+	// the test binds both to the overridden form.
+	operation, err := config.OperationFromEnv(lookup, config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	err = executeRevalidation(context.Background(), service, ports, controlConfig(t), operation, lookup, &stdout)
+	if err == nil || !strings.Contains(err.Error(), config.EnvScannerDatabaseIdentity) {
+		t.Fatalf("executeRevalidation() error = %v, want the scanner database identity failure", err)
 	}
 }
 
@@ -778,7 +982,7 @@ func TestPolicyIdentity(t *testing.T) {
 	original := readBundle
 	t.Cleanup(func() { readBundle = original })
 	readBundle = func(string) ([]byte, error) { return nil, errors.New("no bundle") }
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 	if _, err := policyIdentity(lookup); err == nil {
 		t.Fatal("policyIdentity() error = nil, want the bundle read failure")
 	}
@@ -794,6 +998,125 @@ func TestPolicyIdentity(t *testing.T) {
 	if identity != want {
 		t.Fatalf("policyIdentity() = %q, want %q", identity, want)
 	}
+}
+
+func TestContentOfBindsTheContentPort(t *testing.T) {
+	if _, err := contentOf(Ports{}); err == nil {
+		t.Fatal("contentOf(empty) error = nil, want the content port guard")
+	}
+	content, err := contentOf(Ports{Content: &fakeCandidateContent{}})
+	if err != nil {
+		t.Fatalf("contentOf() error = %v", err)
+	}
+	if content == nil {
+		t.Fatal("contentOf() = nil, want the bound content port")
+	}
+}
+
+func TestProveChannelIdentity(t *testing.T) {
+	values := mergedLaneValues(t)
+	identity, err := domaintooling.ParseTool(values[config.EnvScannerIdentity])
+	if err != nil {
+		t.Fatalf("ParseTool() error = %v", err)
+	}
+	proven, err := proveChannelIdentity(identity, values[config.EnvScannerTool])
+	if err != nil {
+		t.Fatalf("proveChannelIdentity() error = %v", err)
+	}
+	if proven != values[config.EnvScannerIdentity] {
+		t.Fatalf("proveChannelIdentity() = %q, want %q", proven, values[config.EnvScannerIdentity])
+	}
+
+	t.Run("unreadable artifact", func(t *testing.T) {
+		original := readArtifact
+		t.Cleanup(func() { readArtifact = original })
+		readArtifact = func(string) ([]byte, error) {
+			return nil, errors.New("unreadable")
+		}
+		if _, err := proveChannelIdentity(identity, values[config.EnvScannerTool]); err == nil {
+			t.Fatal("proveChannelIdentity() error = nil, want the read failure")
+		}
+	})
+
+	t.Run("digest mismatch", func(t *testing.T) {
+		other := filepath.Join(t.TempDir(), "other")
+		if err := os.WriteFile(other, []byte("other content"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if _, err := proveChannelIdentity(identity, other); err == nil {
+			t.Fatal("proveChannelIdentity() error = nil, want the digest mismatch")
+		}
+	})
+}
+
+func TestProvenScannerIdentity(t *testing.T) {
+	values := mergedLaneValues(t)
+	lookup := laneEnv("control", values)
+	operation, err := config.OperationFromEnv(lookup, config.FieldScannerIdentity)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+	identity, err := provenScannerIdentity(operation, lookup)
+	if err != nil {
+		t.Fatalf("provenScannerIdentity() error = %v", err)
+	}
+	if identity != values[config.EnvScannerIdentity] {
+		t.Fatalf("provenScannerIdentity() = %q, want the proven form %q", identity, values[config.EnvScannerIdentity])
+	}
+
+	t.Run("malformed identity", func(t *testing.T) {
+		values := mergedLaneValues(t)
+		values[config.EnvScannerIdentity] = "osv-scanner 2.2.3"
+		lookup := laneEnv("control", values)
+		operation, err := config.OperationFromEnv(lookup, config.FieldScannerIdentity)
+		if err != nil {
+			t.Fatalf("OperationFromEnv() error = %v", err)
+		}
+		if _, err := provenScannerIdentity(operation, lookup); err == nil || !strings.Contains(err.Error(), config.EnvScannerIdentity) {
+			t.Fatalf("provenScannerIdentity() error = %v, want the identity failure", err)
+		}
+	})
+
+	t.Run("nil lookup", func(t *testing.T) {
+		if _, err := provenScannerIdentity(operation, nil); err == nil {
+			t.Fatal("provenScannerIdentity( nil lookup ) error = nil, want the binding failure")
+		}
+	})
+}
+
+func TestProvenScannerDatabaseIdentity(t *testing.T) {
+	values := mergedLaneValues(t)
+	lookup := laneEnv("control", values)
+	operation, err := config.OperationFromEnv(lookup, config.FieldScannerDatabaseIdentity)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+	identity, err := provenScannerDatabaseIdentity(operation, lookup)
+	if err != nil {
+		t.Fatalf("provenScannerDatabaseIdentity() error = %v", err)
+	}
+	if identity != values[config.EnvScannerDatabaseIdentity] {
+		t.Fatalf("provenScannerDatabaseIdentity() = %q, want the proven form %q", identity, values[config.EnvScannerDatabaseIdentity])
+	}
+
+	t.Run("malformed identity", func(t *testing.T) {
+		values := mergedLaneValues(t)
+		values[config.EnvScannerDatabaseIdentity] = "osv-db sha256:aaa"
+		lookup := laneEnv("control", values)
+		operation, err := config.OperationFromEnv(lookup, config.FieldScannerDatabaseIdentity)
+		if err != nil {
+			t.Fatalf("OperationFromEnv() error = %v", err)
+		}
+		if _, err := provenScannerDatabaseIdentity(operation, lookup); err == nil || !strings.Contains(err.Error(), config.EnvScannerDatabaseIdentity) {
+			t.Fatalf("provenScannerDatabaseIdentity() error = %v, want the identity failure", err)
+		}
+	})
+
+	t.Run("nil lookup", func(t *testing.T) {
+		if _, err := provenScannerDatabaseIdentity(operation, nil); err == nil {
+			t.Fatal("provenScannerDatabaseIdentity( nil lookup ) error = nil, want the binding failure")
+		}
+	})
 }
 
 func TestOperationFields(t *testing.T) {
@@ -817,7 +1140,7 @@ func TestExecuteRejectsAnUnknownOperation(t *testing.T) {
 
 func TestExecuteRoutesEveryLane(t *testing.T) {
 	stubBundle(t)
-	lookup := laneEnv("control", operationInputs())
+	lookup := laneEnv("control", mergedLaneValues(t))
 	lanes := []struct {
 		operation Operation
 		ports     func(t *testing.T) Ports
