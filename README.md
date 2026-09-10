@@ -72,7 +72,13 @@ implement the consumer-defined ports:
   content-identity proof (`promotion.ApprovedRegistry`), and the
   package-scoped download-rule revocation gate (`revocation.DownloadGate`);
 - `evidence`: the append-only evidence reference index
-  (`admission.EvidenceStore`, `revocation.EvidenceRecorder`).
+  (`admission.EvidenceStore`, `revocation.EvidenceRecorder`);
+- `tooling`: the read-only workload tooling channel consumer — at startup the
+  scanning lanes materialize the pinned scanner tool, the scanner database
+  snapshot, and the admission policy bundle from the evidence-zone generic
+  repository, every object proven fail-closed against the content digest its
+  bound identity carries, with atomic, idempotent placement and no overwrite
+  of differing content.
 
 The adapters bind through the validated lane environment:
 
@@ -84,12 +90,26 @@ The adapters bind through the validated lane environment:
 | `DEPENDENCY_AUTHORITY_EVIDENCE_REPOSITORY` | evidence-zone generic repository resource |
 | `DEPENDENCY_AUTHORITY_APPROVED_REPOSITORY` | approved-zone repository resource |
 | `DEPENDENCY_AUTHORITY_POLICY_BUNDLE` | pinned policy bundle path |
+| `DEPENDENCY_AUTHORITY_POLICY_BUNDLE_IDENTITY` | pinned policy bundle channel identity (`dependency-policy/v1@sha256:<digest>`) |
 | `DEPENDENCY_AUTHORITY_SCANNER_TOOL` | pinned scanner tool path |
 | `DEPENDENCY_AUTHORITY_SCANNER_DATABASE` | scanner database snapshot directory |
 | `DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT` | candidate materialization root |
 
 An adapter binds only when its complete environment contract is present; a
 lane requiring an unbound adapter fails closed at bind time.
+
+At startup the admission and revalidation controllers materialize the pinned
+scanner tool, the scanner database snapshot, and the policy bundle from the
+evidence-zone channel, and the promotion controller materializes the policy
+bundle; every object is proven against the digest its bound identity carries
+before the lane runs, and a missing or unprovable object fails the controller
+closed. The scanner tool and database identities arrive through the operation
+inputs (`DEPENDENCY_AUTHORITY_SCANNER_IDENTITY`,
+`DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY`), the policy bundle identity
+through `DEPENDENCY_AUTHORITY_POLICY_BUNDLE_IDENTITY`, and the materialized
+content lands at the bound `DEPENDENCY_AUTHORITY_SCANNER_TOOL`,
+`DEPENDENCY_AUTHORITY_SCANNER_DATABASE`, and `DEPENDENCY_AUTHORITY_POLICY_BUNDLE`
+paths.
 
 The controllers authenticate to the trust-zone APIs through the identity
 attached to the workload: each controller obtains short-lived access tokens at
