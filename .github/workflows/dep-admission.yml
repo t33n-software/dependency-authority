@@ -57,7 +57,7 @@ jobs:
           EXECUTION="$(gcloud run jobs execute "$JOB" \
             --project="$PROJECT" \
             --region="$REGION" \
-            --update-env-vars="^;^DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }};DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }};DEPENDENCY_AUTHORITY_APPROVAL_TTL=72h" \
+            --update-env-vars="^;^DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }};DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }};DEPENDENCY_AUTHORITY_APPROVAL_TTL=72h;DEPENDENCY_AUTHORITY_SCANNER_IDENTITY=osv-scanner/v2.5.1/osv-scanner_linux_amd64@sha256:f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be;DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY=osv-db/go@sha256:474c70f1d32a55dec23f3b45bedc2411298710b0a6add6255f284f6d976909e3" \
             --wait \
             --format="value(name)")"
           test -n "$EXECUTION"
