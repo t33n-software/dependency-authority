@@ -137,8 +137,9 @@ the seven protected `dep-*` environments (ADR-0002): `dep-intake-fetch`,
 `dep-evidence-write`, and `dep-evidence-audit`. Each controller lane takes
 the candidate identity as required dispatch inputs (`module`, `version`; the
 revocation lane additionally takes `reason`), federates its
-environment-scoped workload identity, builds the lane controller, and
-executes the lane use case with the adapters bound from the environment: the
+environment-scoped trigger identity, and invokes the zone-resident workload
+job that executes the lane use case with the adapters bound from the job
+environment: the
 intake lane registers the pending candidate from the controlled upstream
 digest, the admission lane materializes the candidate content from the
 controlled intake boundary (proven against the recorded digest), scans it,
@@ -148,10 +149,14 @@ policy pass, the promotion lane promotes under the newest recorded, still
 valid approval, the revalidation lane materializes the candidate content,
 re-evaluates approved candidates, and records the fresh scan and decision
 evidence with the artifact-proven identities, and the revocation lane blocks
-downloads at the approved boundary and records the revocation evidence. The intake lane additionally probes the
-controlled intake boundary with a bounded read. The workflows carry no
-organization value — every concrete binding arrives through environment
-variables set on the protected environments.
+downloads at the approved boundary and records the revocation evidence. The
+admission lane carries the automatic approval TTL `72h`, and the admission
+and revalidation lanes carry the pinned scanner tool and scanner database
+identities (`DEPENDENCY_AUTHORITY_SCANNER_IDENTITY`,
+`DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY`) as versioned workflow values
+passed as execution parameters — a pin bump is a governed pull request. The
+workflows carry no organization value — every concrete zone binding arrives
+through environment variables set on the protected environments.
 
 ## Quality gates
 

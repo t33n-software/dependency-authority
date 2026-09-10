@@ -244,7 +244,13 @@ func TestLaneWorkflowsBindTheProtectedEnvironments(t *testing.T) {
 			"DEPENDENCY_AUTHORITY_EVIDENCE_REPOSITORY",
 			"DEPENDENCY_AUTHORITY_APPROVED_REPOSITORY",
 			"DEPENDENCY_AUTHORITY_POLICY_BUNDLE",
-			"DEPENDENCY_AUTHORITY_SCANNER",
+			// Documented exception (DA-22): the two scanning lanes carry the
+			// scanner identity operation inputs as versioned workflow values;
+			// the retired data-plane scanner path forms stay forbidden on every
+			// lane, and TestScanningLanesBindTheScannerIdentityOverrides pins
+			// the exact exception surface fail-closed.
+			"DEPENDENCY_AUTHORITY_SCANNER_TOOL",
+			"DEPENDENCY_AUTHORITY_SCANNER_DATABASE=",
 			"DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT",
 			"DEPENDENCY_AUTHORITY_LANE_IDENTITY",
 			"DEP_PROBE_",
@@ -298,6 +304,15 @@ func isHex(value string) bool {
 	return true
 }
 
+// The pinned scanner channel identities the admission and revalidation lanes
+// carry as versioned workflow values (operation inputs, never data-plane
+// bindings); a pin bump is a governed pull request, and the lane runtime
+// proves every value against the materialized channel artifact.
+const (
+	scannerToolIdentityBinding     = "DEPENDENCY_AUTHORITY_SCANNER_IDENTITY=osv-scanner/v2.5.1/osv-scanner_linux_amd64@sha256:f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be"
+	scannerDatabaseIdentityBinding = "DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY=osv-db/go@sha256:474c70f1d32a55dec23f3b45bedc2411298710b0a6add6255f284f6d976909e3"
+)
+
 func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
 	lanes := map[string][]string{
 		"dep-intake-fetch": {
@@ -306,12 +321,14 @@ func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
 		"dep-admission": {
 			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
 			"DEPENDENCY_AUTHORITY_APPROVAL_TTL=72h",
+			scannerToolIdentityBinding, scannerDatabaseIdentityBinding,
 		},
 		"dep-promotion": {
 			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
 		},
 		"dep-revalidation": {
 			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
+			scannerToolIdentityBinding, scannerDatabaseIdentityBinding,
 		},
 		"dep-revocation": {
 			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
@@ -341,6 +358,33 @@ func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
 		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
 		if strings.Contains(content, "--update-env-vars") {
 			t.Fatalf("the evidence lane %s must not pass operation inputs; its workload job takes none", lane)
+		}
+	}
+}
+
+// TestScanningLanesBindTheScannerIdentityOverrides pins the documented
+// exception of the lane environment sweep: exactly the admission and
+// revalidation lanes carry the pinned scanner tool and database identities as
+// versioned workflow values, and every other lane carries no scanner binding
+// at all.
+func TestScanningLanesBindTheScannerIdentityOverrides(t *testing.T) {
+	for _, lane := range []string{"dep-admission", "dep-revalidation"} {
+		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
+		for _, required := range []string{scannerToolIdentityBinding, scannerDatabaseIdentityBinding} {
+			if !strings.Contains(content, required) {
+				t.Fatalf("lane workflow %s does not carry the pinned scanner channel identity %q as a versioned workflow value", lane, required)
+			}
+		}
+		stripped := strings.ReplaceAll(content, "DEPENDENCY_AUTHORITY_SCANNER_IDENTITY", "")
+		stripped = strings.ReplaceAll(stripped, "DEPENDENCY_AUTHORITY_SCANNER_DATABASE_IDENTITY", "")
+		if strings.Contains(stripped, "DEPENDENCY_AUTHORITY_SCANNER") {
+			t.Fatalf("lane workflow %s carries a scanner binding outside the documented identity exception", lane)
+		}
+	}
+	for _, lane := range []string{"dep-intake-fetch", "dep-promotion", "dep-revocation", "dep-evidence-write", "dep-evidence-audit"} {
+		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
+		if strings.Contains(content, "DEPENDENCY_AUTHORITY_SCANNER") {
+			t.Fatalf("lane workflow %s carries a scanner binding; only the admission and revalidation lanes carry the scanner identity operation inputs", lane)
 		}
 	}
 }
