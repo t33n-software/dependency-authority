@@ -68,11 +68,13 @@ implement the consumer-defined ports:
   snapshot database, CVSS v3 base scoring, and a conservative maximum score
   for vulnerabilities without a computable vector;
 - `artifactregistry`: the append-only candidate records store
-  (`Candidates`), the approved-zone publisher with the dirhash
-  content-identity proof (`promotion.ApprovedRegistry`), the
-  package-scoped download-rule revocation gate (`revocation.DownloadGate`),
-  and the candidate content materialization that fetches the module archive
-  from the controlled intake boundary, proves it against the recorded
+  (`Candidates`), the approved-zone publisher that uploads the
+  digest-proven module archive through the direct Artifact Registry Go
+  module upload and proves the content identity before and after the
+  publication (`promotion.ApprovedRegistry`), the package-scoped
+  download-rule revocation gate (`revocation.DownloadGate`), and the
+  candidate content materialization that fetches the module archive from
+  the controlled intake boundary, proves it against the recorded
   candidate digest, and places it at the canonical content path for the scan;
 - `evidence`: the append-only evidence reference index
   (`admission.EvidenceStore`, `revocation.EvidenceRecorder`);

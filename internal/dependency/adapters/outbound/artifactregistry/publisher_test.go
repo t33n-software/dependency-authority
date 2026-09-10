@@ -13,9 +13,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
@@ -65,16 +65,31 @@ func digestOf(content []byte) string {
 }
 
 // publisherFixture binds a fake transport that serves the intake and approved
-// archives by host.
+// archives by host and the module upload and upload-operation reads of the
+// Artifact Registry API surface.
 type publisherFixture struct {
 	intakeArchive   []byte
 	approvedArchive []byte
 	intakeStatus    int
 	approvedStatus  int
 	transportErr    error
+	uploadErr       error
+	uploadStatus    int
+	uploadBody      string
+	operationErr    error
+	operationStatus int
+	operationBody   string
+	pendingPolls    int
+
+	uploads           int
+	uploadURL         string
+	uploadContentType string
+	uploadContent     []byte
+	polls             int
+	pollURLs          []string
 }
 
-func (f publisherFixture) do(req *http.Request) (*http.Response, error) {
+func (f *publisherFixture) do(req *http.Request) (*http.Response, error) {
 	if f.transportErr != nil {
 		return nil, f.transportErr
 	}
@@ -89,24 +104,44 @@ func (f publisherFixture) do(req *http.Request) (*http.Response, error) {
 			return &http.Response{Status: "approved failure", StatusCode: f.approvedStatus, Body: io.NopCloser(strings.NewReader(""))}, nil
 		}
 		return okResponse(string(f.approvedArchive)), nil
+	case "artifactregistry.googleapis.com":
+		if req.Method == http.MethodPost {
+			f.uploads++
+			f.uploadURL = req.URL.String()
+			f.uploadContentType = req.Header.Get("Content-Type")
+			content, _ := io.ReadAll(req.Body)
+			f.uploadContent = content
+			if f.uploadErr != nil {
+				return nil, f.uploadErr
+			}
+			if f.uploadStatus != 0 {
+				return &http.Response{Status: "upload failure", StatusCode: f.uploadStatus, Body: io.NopCloser(strings.NewReader(""))}, nil
+			}
+			body := f.uploadBody
+			if body == "" {
+				body = `{"operation":{"name":"projects/p/locations/l/operations/op-1"}}`
+			}
+			return okResponse(body), nil
+		}
+		f.polls++
+		f.pollURLs = append(f.pollURLs, req.URL.String())
+		if f.operationErr != nil {
+			return nil, f.operationErr
+		}
+		if f.operationStatus != 0 {
+			return &http.Response{Status: "operation failure", StatusCode: f.operationStatus, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		if f.polls <= f.pendingPolls {
+			return okResponse(`{"name":"projects/p/locations/l/operations/op-1","done":false}`), nil
+		}
+		body := f.operationBody
+		if body == "" {
+			body = `{"name":"projects/p/locations/l/operations/op-1","done":true,"response":{}}`
+		}
+		return okResponse(body), nil
 	default:
 		return nil, errors.New("unexpected host " + req.URL.Host)
 	}
-}
-
-type fakeUploadRunner struct {
-	result Result
-	err    error
-	calls  int
-	dir    string
-	args   []string
-}
-
-func (f *fakeUploadRunner) run(_ context.Context, dir string, _ string, args ...string) (Result, error) {
-	f.calls++
-	f.dir = dir
-	f.args = args
-	return f.result, f.err
 }
 
 func tempFactory(t *testing.T) func() (string, func(), error) {
@@ -120,14 +155,13 @@ func failingTempFactory() (string, func(), error) {
 	return "", nil, errors.New("no workspace")
 }
 
-func newPublisher(t *testing.T, doer Doer, run Runner) Publisher {
+func newPublisher(t *testing.T, doer Doer) Publisher {
 	t.Helper()
 	publisher, err := NewPublisher(
 		newTestClient(t, doer),
 		"https://intake.example.com/p/r",
 		"https://approved.example.com/p/r",
 		"projects/p/locations/l/repositories/r",
-		run,
 		tempFactory(t),
 	)
 	if err != nil {
@@ -162,54 +196,54 @@ func TestNewPublisherValidatesConfiguration(t *testing.T) {
 		{"invalid repository", "https://intake.example.com", "https://approved.example.com", "bogus"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := NewPublisher(client, tc.intake, tc.approved, tc.repo, func(context.Context, string, string, ...string) (Result, error) {
-				return Result{}, nil
-			}, tempFactory(t)); err == nil {
+			if _, err := NewPublisher(client, tc.intake, tc.approved, tc.repo, tempFactory(t)); err == nil {
 				t.Fatal("NewPublisher() error = nil, want error")
 			}
 		})
 	}
-	if _, err := NewPublisher(client, "https://intake.example.com", "https://approved.example.com", "projects/p/locations/l/repositories/r", nil, tempFactory(t)); err == nil {
-		t.Fatal("NewPublisher( nil runner ) error = nil, want error")
-	}
-	if _, err := NewPublisher(client, "https://intake.example.com", "https://approved.example.com", "projects/p/locations/l/repositories/r", func(context.Context, string, string, ...string) (Result, error) {
-		return Result{}, nil
-	}, nil); err == nil {
+	if _, err := NewPublisher(client, "https://intake.example.com", "https://approved.example.com", "projects/p/locations/l/repositories/r", nil); err == nil {
 		t.Fatal("NewPublisher( nil temp dir ) error = nil, want error")
 	}
 }
 
 func TestPublishProvesContentIdentityEndToEnd(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
-	runner := &fakeUploadRunner{result: Result{ExitCode: 0}}
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive, approvedArchive: archive}.do), runner.run)
+	fixture := &publisherFixture{intakeArchive: archive, approvedArchive: archive}
+	publisher := newPublisher(t, doerFunc(fixture.do))
 
 	subject := publishableCandidate(t, archive)
 	if err := publisher.Publish(context.Background(), subject, []evidence.Reference{}); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
-	if runner.calls != 1 {
-		t.Fatalf("upload calls = %d, want 1", runner.calls)
+	if fixture.uploads != 1 {
+		t.Fatalf("uploads = %d, want 1", fixture.uploads)
 	}
-	wantArgs := []string{"artifacts", "go", "upload", "--project=p", "--location=l", "--repository=r", "--module-path=example.com/mod", "--version=v1.0.0"}
-	if !reflect.DeepEqual(runner.args[:len(wantArgs)], wantArgs) {
-		t.Fatalf("upload args = %v, want prefix %v", runner.args, wantArgs)
+	wantURL := "https://artifactregistry.googleapis.com/upload/v1/projects/p/locations/l/repositories/r/goModules:create?uploadType=multipart"
+	if fixture.uploadURL != wantURL {
+		t.Fatalf("upload URL = %q, want %q", fixture.uploadURL, wantURL)
 	}
-	if !strings.HasPrefix(runner.args[len(wantArgs)], "--source=") {
-		t.Fatalf("upload args = %v, want a --source binding", runner.args)
+	if !strings.HasPrefix(fixture.uploadContentType, "multipart/related; boundary=") {
+		t.Fatalf("upload content type = %q, want the multipart/related form", fixture.uploadContentType)
 	}
-	if _, err := os.Stat(runner.dir); err != nil {
-		t.Fatalf("module root %q not materialized: %v", runner.dir, err)
+	if !bytes.Contains(fixture.uploadContent, []byte("application/json")) || !bytes.Contains(fixture.uploadContent, []byte(`{}`)) {
+		t.Fatal("the upload body misses the empty JSON metadata part")
 	}
-	if !strings.HasSuffix(runner.dir, filepath.FromSlash("example.com/mod@v1.0.0")) {
-		t.Fatalf("module root = %q, want the module@version directory", runner.dir)
+	if !bytes.Contains(fixture.uploadContent, archive) {
+		t.Fatal("the upload body does not carry the proven module archive")
+	}
+	if fixture.polls != 1 {
+		t.Fatalf("polls = %d, want 1", fixture.polls)
+	}
+	wantPoll := "https://artifactregistry.googleapis.com/v1/projects/p/locations/l/operations/op-1"
+	if fixture.pollURLs[0] != wantPoll {
+		t.Fatalf("poll URL = %q, want %q", fixture.pollURLs[0], wantPoll)
 	}
 }
 
 func TestPublishRejectsIntakeDigestDrift(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	drifted := moduleZip(t, "example.com/mod@v1.0.0/", map[string]string{"go.mod": "module example.com/mod\n"})
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive}.do), (&fakeUploadRunner{}).run)
+	publisher := newPublisher(t, doerFunc((&publisherFixture{intakeArchive: archive}).do))
 
 	subject := publishableCandidate(t, drifted)
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
@@ -221,17 +255,17 @@ func TestPublishIntakeFetchFailures(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	subject := publishableCandidate(t, archive)
 
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeStatus: http.StatusNotFound}.do), (&fakeUploadRunner{}).run)
+	publisher := newPublisher(t, doerFunc((&publisherFixture{intakeStatus: http.StatusNotFound}).do))
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want intake not-found error")
 	}
 
-	publisher = newPublisher(t, doerFunc(publisherFixture{intakeStatus: http.StatusInternalServerError}.do), (&fakeUploadRunner{}).run)
+	publisher = newPublisher(t, doerFunc((&publisherFixture{intakeStatus: http.StatusInternalServerError}).do))
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want intake status error")
 	}
 
-	publisher = newPublisher(t, doerFunc(publisherFixture{transportErr: errors.New("reset")}.do), (&fakeUploadRunner{}).run)
+	publisher = newPublisher(t, doerFunc((&publisherFixture{transportErr: errors.New("reset")}).do))
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want intake transport error")
 	}
@@ -239,7 +273,7 @@ func TestPublishIntakeFetchFailures(t *testing.T) {
 
 func TestPublishRejectsCorruptModuleArchive(t *testing.T) {
 	corrupt := []byte("not a zip")
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: corrupt}.do), (&fakeUploadRunner{}).run)
+	publisher := newPublisher(t, doerFunc((&publisherFixture{intakeArchive: corrupt}).do))
 	subject := publishableCandidate(t, corrupt)
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want archive error")
@@ -249,11 +283,10 @@ func TestPublishRejectsCorruptModuleArchive(t *testing.T) {
 func TestPublishPropagatesWorkspaceFailure(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	publisher, err := NewPublisher(
-		newTestClient(t, doerFunc(publisherFixture{intakeArchive: archive}.do)),
+		newTestClient(t, doerFunc((&publisherFixture{intakeArchive: archive}).do)),
 		"https://intake.example.com/p/r",
 		"https://approved.example.com/p/r",
 		"projects/p/locations/l/repositories/r",
-		(&fakeUploadRunner{}).run,
 		failingTempFactory,
 	)
 	if err != nil {
@@ -269,22 +302,142 @@ func TestPublishUploadFailures(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	subject := publishableCandidate(t, archive)
 
-	runner := &fakeUploadRunner{err: errors.New("gcloud missing")}
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive}.do), runner.run)
-	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
-		t.Fatal("Publish() error = nil, want runner error")
-	}
+	t.Run("transport error", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, uploadErr: errors.New("reset")}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want upload transport error")
+		}
+	})
 
-	runner = &fakeUploadRunner{result: Result{ExitCode: 2}}
-	publisher = newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive}.do), runner.run)
-	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
-		t.Fatal("Publish() error = nil, want exit code error")
+	t.Run("status error", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, uploadStatus: http.StatusInternalServerError}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want upload status error")
+		}
+	})
+
+	t.Run("malformed operation response", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, uploadBody: `{`}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want operation decode error")
+		}
+	})
+
+	t.Run("missing operation name", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, uploadBody: `{"operation":{}}`}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want operation name error")
+		}
+	})
+}
+
+func TestPublishAwaitsTheUploadOperation(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	fixture := &publisherFixture{intakeArchive: archive, approvedArchive: archive, pendingPolls: 2}
+	publisher := newPublisher(t, doerFunc(fixture.do))
+	subject := publishableCandidate(t, archive)
+
+	original := awaitPoll
+	awaitPoll = func(context.Context) error { return nil }
+	t.Cleanup(func() { awaitPoll = original })
+
+	if err := publisher.Publish(context.Background(), subject, nil); err != nil {
+		t.Fatalf("Publish() error = %v", err)
 	}
+	if fixture.polls != 3 {
+		t.Fatalf("polls = %d, want 3 (two pending reads and the completed read)", fixture.polls)
+	}
+}
+
+func TestPublishUploadOperationFailures(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	subject := publishableCandidate(t, archive)
+
+	original := awaitPoll
+	awaitPoll = func(context.Context) error { return nil }
+	t.Cleanup(func() { awaitPoll = original })
+
+	t.Run("poll transport error", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, operationErr: errors.New("reset")}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want operation read error")
+		}
+	})
+
+	t.Run("poll status error", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, operationStatus: http.StatusInternalServerError}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want operation status error")
+		}
+	})
+
+	t.Run("poll malformed operation", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, operationBody: `{`}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want operation decode error")
+		}
+	})
+
+	t.Run("operation error state", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, operationBody: `{"name":"projects/p/locations/l/operations/op-1","done":true,"error":{"code":13,"message":"broken"}}`}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want operation error")
+		}
+	})
+
+	t.Run("poll budget exhausted", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, pendingPolls: maxUploadPolls + 1}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want poll budget error")
+		}
+		if fixture.polls != maxUploadPolls {
+			t.Fatalf("polls = %d, want the bounded %d", fixture.polls, maxUploadPolls)
+		}
+	})
+
+	t.Run("wait seam failure", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, pendingPolls: 1}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		original := awaitPoll
+		awaitPoll = func(context.Context) error { return errors.New("wait failed") }
+		t.Cleanup(func() { awaitPoll = original })
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want wait error")
+		}
+	})
+}
+
+func TestAwaitPoll(t *testing.T) {
+	t.Run("waits for the interval", func(t *testing.T) {
+		original := pollInterval
+		pollInterval = time.Nanosecond
+		t.Cleanup(func() { pollInterval = original })
+		if err := awaitPoll(context.Background()); err != nil {
+			t.Fatalf("awaitPoll() error = %v", err)
+		}
+	})
+
+	t.Run("honors cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := awaitPoll(ctx); err == nil {
+			t.Fatal("awaitPoll() error = nil, want context error")
+		}
+	})
 }
 
 func TestPublishApprovedFetchFailure(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive, approvedStatus: http.StatusInternalServerError}.do), (&fakeUploadRunner{}).run)
+	publisher := newPublisher(t, doerFunc((&publisherFixture{intakeArchive: archive, approvedStatus: http.StatusInternalServerError}).do))
 	subject := publishableCandidate(t, archive)
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want approved fetch error")
@@ -298,7 +451,7 @@ func TestPublishRejectsPostPublicationMismatch(t *testing.T) {
 		"mod.go":  "package mod\n",
 		"evil.go": "package mod\n",
 	})
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive, approvedArchive: mutated}.do), (&fakeUploadRunner{result: Result{ExitCode: 0}}).run)
+	publisher := newPublisher(t, doerFunc((&publisherFixture{intakeArchive: archive, approvedArchive: mutated}).do))
 	subject := publishableCandidate(t, archive)
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want content identity mismatch error")
@@ -308,7 +461,7 @@ func TestPublishRejectsPostPublicationMismatch(t *testing.T) {
 func TestPublishApprovedArchiveCorrupt(t *testing.T) {
 	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
 	corrupt := []byte("not a zip")
-	publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive, approvedArchive: corrupt}.do), (&fakeUploadRunner{result: Result{ExitCode: 0}}).run)
+	publisher := newPublisher(t, doerFunc((&publisherFixture{intakeArchive: archive, approvedArchive: corrupt}).do))
 	subject := publishableCandidate(t, archive)
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want approved archive error")
@@ -325,7 +478,7 @@ func TestPublishRejectsHashFailures(t *testing.T) {
 		readModuleFile = func(string) ([]byte, error) {
 			return nil, errors.New("read failure")
 		}
-		publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive}.do), (&fakeUploadRunner{result: Result{ExitCode: 0}}).run)
+		publisher := newPublisher(t, doerFunc((&publisherFixture{intakeArchive: archive}).do))
 		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 			t.Fatal("Publish() error = nil, want pre-publication hash error")
 		}
@@ -342,7 +495,7 @@ func TestPublishRejectsHashFailures(t *testing.T) {
 			}
 			return os.ReadFile(name)
 		}
-		publisher := newPublisher(t, doerFunc(publisherFixture{intakeArchive: archive, approvedArchive: archive}.do), (&fakeUploadRunner{result: Result{ExitCode: 0}}).run)
+		publisher := newPublisher(t, doerFunc((&publisherFixture{intakeArchive: archive, approvedArchive: archive}).do))
 		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 			t.Fatal("Publish() error = nil, want post-publication hash error")
 		}

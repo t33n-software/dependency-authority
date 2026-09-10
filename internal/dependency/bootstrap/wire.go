@@ -94,7 +94,7 @@ func PortsFromEnv(lookup func(string) string) (Ports, error) {
 			ports.Gate = gate
 
 			if bindings.UpstreamEndpoint() != "" && bindings.ApprovedEndpoint() != "" {
-				publisher, err := artifactregistry.NewPublisher(client, bindings.UpstreamEndpoint(), bindings.ApprovedEndpoint(), bindings.ApprovedRepository(), artifactregistry.ExecRunner, artifactregistry.ModuleWorkspace)
+				publisher, err := artifactregistry.NewPublisher(client, bindings.UpstreamEndpoint(), bindings.ApprovedEndpoint(), bindings.ApprovedRepository(), artifactregistry.ModuleWorkspace)
 				if err != nil {
 					return Ports{}, fmt.Errorf("bind publisher adapter: %w", err)
 				}
