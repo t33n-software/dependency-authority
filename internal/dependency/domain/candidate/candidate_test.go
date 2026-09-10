@@ -1,6 +1,7 @@
 package candidate
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -215,5 +216,27 @@ func TestRevokeFromQuarantinedAndApproved(t *testing.T) {
 	}
 	if approved.State() != StateRevoked {
 		t.Fatalf("State() = %q, want %q", approved.State(), StateRevoked)
+	}
+}
+
+func TestContentPath(t *testing.T) {
+	subject := newPending(t)
+	got, err := subject.ContentPath("root")
+	if err != nil {
+		t.Fatalf("ContentPath() error = %v", err)
+	}
+	want := filepath.Join("root", "go", filepath.FromSlash("example.com/module")+"@v1.2.3")
+	if got != want {
+		t.Fatalf("ContentPath() = %q, want %q", got, want)
+	}
+}
+
+func TestContentPathRejectsEscapes(t *testing.T) {
+	subject, err := New(EcosystemGo, "../../escape", "v1.0.0", validDigest)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := subject.ContentPath("root"); err == nil {
+		t.Fatal("ContentPath() error = nil, want the escape guard")
 	}
 }

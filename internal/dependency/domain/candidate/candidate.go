@@ -5,6 +5,8 @@ package candidate
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -105,6 +107,18 @@ func (c Candidate) Evidence() []evidence.Reference {
 	trail := make([]evidence.Reference, len(c.evidence))
 	copy(trail, c.evidence)
 	return trail
+}
+
+// ContentPath binds the candidate content to its canonical materialization
+// path within the given root — <root>/<ecosystem>/<name>@<version> — and
+// rejects any path that escapes the root.
+func (c Candidate) ContentPath(root string) (string, error) {
+	cleaned := filepath.Clean(root)
+	full := filepath.Join(cleaned, string(c.ecosystem), filepath.FromSlash(c.name)+"@"+c.version)
+	if full != cleaned && !strings.HasPrefix(full, cleaned+string(os.PathSeparator)) {
+		return "", fmt.Errorf("candidate content path %q escapes the materialization root", full)
+	}
+	return full, nil
 }
 
 // RecordEvidence appends immutable evidence to the candidate audit trail.

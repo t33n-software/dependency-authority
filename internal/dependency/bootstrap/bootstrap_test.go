@@ -7,11 +7,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
+	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/scanner"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/admission"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
@@ -97,6 +100,28 @@ func (f *fakeGate) Block(context.Context, candidate.Candidate) error {
 	return f.err
 }
 
+// fakeCandidateContent records the candidate content materialization calls.
+type fakeCandidateContent struct {
+	err    error
+	calls  int
+	events *[]string
+}
+
+func (f *fakeCandidateContent) Materialize(_ context.Context, subject candidate.Candidate) (string, error) {
+	f.calls++
+	if f.events != nil {
+		*f.events = append(*f.events, "materialize")
+	}
+	return filepath.Join("content", string(subject.Ecosystem()), filepath.FromSlash(subject.Name())+"@"+subject.Version()), f.err
+}
+
+// scannerFunc binds a closure to the scanner port.
+type scannerFunc func(context.Context, candidate.Candidate) (admission.ScanResult, error)
+
+func (f scannerFunc) Scan(ctx context.Context, subject candidate.Candidate) (admission.ScanResult, error) {
+	return f(ctx, subject)
+}
+
 // fakeJournal mirrors the evidence store contract: content-addressed payload
 // publication plus reference indexing.
 type fakeJournal struct {
@@ -108,6 +133,7 @@ type fakeJournal struct {
 	recordCalls  int
 	puts         []evidence.Reference
 	records      []evidence.Reference
+	payloads     [][]byte
 }
 
 func (f *fakeJournal) Put(_ context.Context, _ candidate.Candidate, evidenceType evidence.Type, issuer string, payload []byte, issuedAt time.Time, expiresAt *time.Time) (evidence.Reference, error) {
@@ -124,6 +150,7 @@ func (f *fakeJournal) Put(_ context.Context, _ candidate.Candidate, evidenceType
 		return evidence.Reference{}, err
 	}
 	f.puts = append(f.puts, reference)
+	f.payloads = append(f.payloads, payload)
 	return reference, nil
 }
 
@@ -191,8 +218,54 @@ func fullPorts(t *testing.T) Ports {
 		Gate:          &fakeGate{},
 		Recorder:      journal,
 		Journal:       journal,
+		Content:       &fakeCandidateContent{},
 		Now:           func() time.Time { return laneTime },
 	}
+}
+
+// writeChannelArtifact writes a fake channel artifact file.
+func writeChannelArtifact(t *testing.T, path string, content []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
+
+// channelArtifacts materializes fake channel artifacts and returns the lane
+// environment values carrying the matching digest-bound identities. The
+// artifact content is fixed, so every call derives the same identity digests.
+func channelArtifacts(t *testing.T) map[string]string {
+	t.Helper()
+	root := t.TempDir()
+	toolContent := []byte("fake osv-scanner binary")
+	databaseContent := []byte("fake osv snapshot")
+	toolPath := filepath.Join(root, "tools", "osv-scanner")
+	databaseDir := filepath.Join(root, "osv-db")
+	writeChannelArtifact(t, toolPath, toolContent)
+	writeChannelArtifact(t, scanner.DatabaseSnapshotPath(databaseDir), databaseContent)
+	toolSum := sha256.Sum256(toolContent)
+	databaseSum := sha256.Sum256(databaseContent)
+	return map[string]string{
+		config.EnvScannerTool:             toolPath,
+		config.EnvScannerDatabase:         databaseDir,
+		config.EnvScanContentRoot:         filepath.Join(root, "content"),
+		config.EnvScannerIdentity:         "osv-scanner/v2.5.1/osv-scanner_linux_amd64@sha256:" + hex.EncodeToString(toolSum[:]),
+		config.EnvScannerDatabaseIdentity: "osv-db/go@sha256:" + hex.EncodeToString(databaseSum[:]),
+	}
+}
+
+// mergedLaneValues carries the operation inputs plus the channel artifact
+// bindings of the scanning lanes.
+func mergedLaneValues(t *testing.T) map[string]string {
+	t.Helper()
+	values := operationInputs()
+	for key, value := range channelArtifacts(t) {
+		values[key] = value
+	}
+	return values
 }
 
 func staticPorts(ports Ports, err error) PortsBuilder {
@@ -364,7 +437,7 @@ func TestLaneWrappers(t *testing.T) {
 	for _, lane := range lanes {
 		t.Run(lane.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := lane.run(context.Background(), laneEnv(lane.zone, operationInputs()), staticPorts(lane.ports(t), nil), &stdout, &stderr)
+			code := lane.run(context.Background(), laneEnv(lane.zone, mergedLaneValues(t)), staticPorts(lane.ports(t), nil), &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("Run() = %d, want 0; stderr = %q", code, stderr.String())
 			}
