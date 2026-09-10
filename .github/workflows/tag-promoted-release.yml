@@ -68,7 +68,7 @@ jobs:
     permissions:
       actions: write
       contents: write
-    uses: t33n-software/git-governance/.github/workflows/reusable-tag-promoted-release.yml@77da3857d8db3f3567522651750980e087c0a6eb
+    uses: t33n-software/git-governance/.github/workflows/reusable-tag-promoted-release.yml@3db7d207fba8f304a105b84b1300f1a0cb509500
     with:
       release_branch: ${{ inputs.release_branch }}
       merge_sha: ${{ inputs.merge_sha }}
