@@ -67,7 +67,7 @@ jobs:
       actions: write
       contents: write
       id-token: write
-    uses: t33n-software/git-governance/.github/workflows/reusable-hotfix-delivery.yml@77da3857d8db3f3567522651750980e087c0a6eb
+    uses: t33n-software/git-governance/.github/workflows/reusable-hotfix-delivery.yml@3db7d207fba8f304a105b84b1300f1a0cb509500
     with:
       hotfix_branch: ${{ inputs.hotfix_branch }}
       record: ${{ inputs.record }}
