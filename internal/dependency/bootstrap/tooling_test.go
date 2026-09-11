@@ -89,7 +89,7 @@ func TestToolingChannelRequestsScopesTheLanes(t *testing.T) {
 		if requests[0].Identity().String() != testToolIdentity || requests[0].Target() != "tools/osv-scanner" || requests[0].Mode() != 0o755 {
 			t.Fatalf("tool request = %q %q %o", requests[0].Identity(), requests[0].Target(), requests[0].Mode())
 		}
-		wantDatabaseTarget := filepath.Join("tools", "osv-db", "osv-scanner", "Go", "all.zip")
+		wantDatabaseTarget := filepath.Join("tools", "osv-db", "osv-scalibr", "Go", "all.zip")
 		if requests[1].Identity().String() != testDatabaseIdentity || requests[1].Target() != wantDatabaseTarget || requests[1].Mode() != 0o644 {
 			t.Fatalf("database request = %q %q %o", requests[1].Identity(), requests[1].Target(), requests[1].Mode())
 		}

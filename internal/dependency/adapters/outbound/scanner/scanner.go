@@ -88,10 +88,12 @@ func (o OSV) Scan(ctx context.Context, subject candidate.Candidate) (admission.S
 }
 
 // DatabaseSnapshotPath returns the local snapshot document path within the
-// scanner database directory: the OSV local database cache layout carries the
-// ecosystem export at osv-scanner/Go/all.zip.
+// scanner database directory: the pinned osv-scanner reads the local database
+// cache layout at osv-scalibr/Go/all.zip (the scalibr-migration form, proven
+// against the live acceptance failure of the documented osv-scanner form,
+// which the pinned scanner never reads).
 func DatabaseSnapshotPath(database string) string {
-	return filepath.Join(database, "osv-scanner", "Go", "all.zip")
+	return filepath.Join(database, "osv-scalibr", "Go", "all.zip")
 }
 
 // scanOutput mirrors the OSV-Scanner JSON result document.

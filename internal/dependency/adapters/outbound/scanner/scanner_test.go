@@ -70,9 +70,21 @@ func TestNewOSVValidatesConfiguration(t *testing.T) {
 
 func TestDatabaseSnapshotPath(t *testing.T) {
 	got := DatabaseSnapshotPath("db")
-	want := filepath.Join("db", "osv-scanner", "Go", "all.zip")
+	want := filepath.Join("db", "osv-scalibr", "Go", "all.zip")
 	if got != want {
 		t.Fatalf("DatabaseSnapshotPath() = %q, want %q", got, want)
+	}
+}
+
+func TestDatabaseSnapshotPathBindsTheProvenScalibrLayout(t *testing.T) {
+	got := filepath.ToSlash(DatabaseSnapshotPath("db"))
+	if !strings.Contains(got, "/osv-scalibr/") {
+		t.Fatalf("DatabaseSnapshotPath() = %q, want the proven osv-scalibr layout the pinned scanner reads", got)
+	}
+	for _, segment := range strings.Split(got, "/") {
+		if segment == "osv-scanner" {
+			t.Fatalf("DatabaseSnapshotPath() = %q carries the retired osv-scanner layout segment, which the pinned scanner never reads", got)
+		}
 	}
 }
 
