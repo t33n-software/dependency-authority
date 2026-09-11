@@ -29,6 +29,8 @@
 
 | DA-28 | Correct the scanner database snapshot layout to the form the pinned scanner reads: the pinned osv-scanner v2.5.1 resolves the offline database at `<cache>/osv-scalibr/<ecosystem>/all.zip` (the scalibr-migration form), never the documented `osv-scanner` form (proven by the differential local reproduction of the live acceptance failure: the documented form exits 127 with "no offline version of the OSV database is available", while the scalibr form loads the database and completes the scan, including on the pinned non-root runtime), so the snapshot layout helper now produces the scalibr form; the whitebox suites follow the corrected form, and a regression guard binds the proven layout and forbids the retired form fail-closed. | In progress |
 
+| DA-29 | Carry the scanner diagnostics in the fail-closed error path: the scanner child process standard error is captured into a bounded buffer, and the exit-code failure now carries a single-line, length-bounded excerpt of the scanner's own diagnostic text (`scanner exited with code <N>: <excerpt>`), so a workload failure is diagnosable from the lane evidence alone (proven necessary by the acceptance failure that required a local reproduction because the adapter discarded the scanner output); the result form, the exit-code contract, and the success path are unchanged; the whitebox suite covers the capture bound, the excerpt normalization, and the empty-diagnostics form, and a regression guard binds the excerpt-carrying form fail-closed. | In progress |
+
 ## Scope boundaries
 
 - DA-1 delivers the source-level core only. It does not deliver trust-zone
