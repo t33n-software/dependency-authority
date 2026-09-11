@@ -157,9 +157,11 @@ func (c Client) list(ctx context.Context, repository string, packageID string, v
 	}
 }
 
-// download fetches one stored file by its server-issued resource name.
+// download fetches one stored file by its server-issued resource name in the
+// media form: without alt=media the endpoint answers the JSON envelope instead
+// of the file bytes.
 func (c Client) download(ctx context.Context, name string) ([]byte, error) {
-	content, status, err := c.do(ctx, http.MethodGet, c.api+"/v1/"+name+":download", nil, "")
+	content, status, err := c.do(ctx, http.MethodGet, c.api+"/v1/"+name+":download?alt=media", nil, "")
 	if err != nil {
 		return nil, err
 	}

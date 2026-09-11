@@ -236,7 +236,9 @@ func TestListFailures(t *testing.T) {
 }
 
 func TestDownload(t *testing.T) {
-	client := newTestClient(t, doerFunc(func(*http.Request) (*http.Response, error) {
+	var gotURL string
+	client := newTestClient(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+		gotURL = req.URL.String()
 		return okResponse("file-content"), nil
 	}))
 	content, err := client.download(context.Background(), "projects/p/locations/l/repositories/r/files/pkg:v1:a.json")
@@ -245,6 +247,9 @@ func TestDownload(t *testing.T) {
 	}
 	if string(content) != "file-content" {
 		t.Fatalf("download() = %q, want file-content", content)
+	}
+	if !strings.HasSuffix(gotURL, ":download?alt=media") {
+		t.Fatalf("download URL = %q, want the alt=media download form", gotURL)
 	}
 
 	client = newTestClient(t, doerFunc(func(*http.Request) (*http.Response, error) {
