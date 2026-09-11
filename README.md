@@ -86,7 +86,9 @@ implement the consumer-defined ports:
   of differing content; each bound identity maps to the platform's generic
   file address `<package>:<version>:<filename>` (the stored filename carries
   the platform-safe `<algorithm>-<hex>` digest notation), and the inventory
-  resolution decodes the server-issued resource names before the comparison.
+  resolution decodes the server-issued resource names before the comparison;
+  the download requests the media form (`?alt=media`), so the proven content
+  is the file bytes, never the JSON envelope.
 
 The adapters bind through the validated lane environment:
 

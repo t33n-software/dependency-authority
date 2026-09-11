@@ -141,9 +141,11 @@ func (t transport) list(ctx context.Context, repository string) ([]fileEntry, er
 	}
 }
 
-// download fetches one stored file by its server-issued resource name.
+// download fetches one stored file by its server-issued resource name. The
+// request carries the media form (?alt=media): without it the platform
+// answers the JSON envelope instead of the file bytes.
 func (t transport) download(ctx context.Context, name string) ([]byte, error) {
-	content, status, err := t.do(ctx, http.MethodGet, t.api+"/v1/"+name+":download")
+	content, status, err := t.do(ctx, http.MethodGet, t.api+"/v1/"+name+":download?alt=media")
 	if err != nil {
 		return nil, err
 	}
