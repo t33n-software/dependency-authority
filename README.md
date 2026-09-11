@@ -83,7 +83,9 @@ implement the consumer-defined ports:
   snapshot, and the admission policy bundle from the evidence-zone generic
   repository, every object proven fail-closed against the content digest its
   bound identity carries, with atomic, idempotent placement and no overwrite
-  of differing content.
+  of differing content; the inventory resolution compares the canonical
+  decoded resource-name form, because the platform carries the file path
+  URL-encoded in the inventory resource names.
 
 The adapters bind through the validated lane environment:
 
