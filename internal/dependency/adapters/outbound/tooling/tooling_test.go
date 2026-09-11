@@ -85,11 +85,12 @@ func newChannelServer() *channelServer {
 	return &channelServer{documents: make(map[string][]byte)}
 }
 
-// serve stores the content under the channel object path. The inventory lists
-// the platform wire form of the resource name — the file path URL-encoded
-// with the path slashes as %2F, as the Artifact Registry files.list response
-// carries it — while the download request path decodes back to the logical
-// form the documents are keyed by.
+// serve stores the content under the channel object address. The inventory
+// lists the platform wire form of the resource name — a filename slash would
+// be URL-encoded as %2F, as the Artifact Registry files.list response carries
+// it — while the download request path decodes back to the logical form the
+// documents are keyed by. The channel addresses carry no slashes, so their
+// wire form is literal.
 func (s *channelServer) serve(object string, content []byte) {
 	name := "projects/p/locations/l/repositories/r/files/" + object
 	s.documents[name] = content
@@ -179,21 +180,21 @@ func TestNewRequestValidatesTheBinding(t *testing.T) {
 
 func TestObjectPathDerivesTheStoredCoordinates(t *testing.T) {
 	tool := toolIdentityFor(t, []byte("tool"))
-	wantTool := "tooling/osv-scanner/v2.5.1/osv-scanner_linux_amd64@sha256-" + tool.DigestHex()
+	wantTool := "osv-scanner:v2.5.1:osv-scanner_linux_amd64@sha256-" + tool.DigestHex()
 	got, err := objectPath(tool)
 	if err != nil || got != wantTool {
 		t.Fatalf("objectPath(tool) = %q, %v, want %q", got, err, wantTool)
 	}
 
 	database := databaseIdentityFor(t, []byte("db"))
-	wantDatabase := "tooling/osv-db/go/all-" + database.DigestHex() + ".zip"
+	wantDatabase := "osv-db:go:all-" + database.DigestHex() + ".zip"
 	got, err = objectPath(database)
 	if err != nil || got != wantDatabase {
 		t.Fatalf("objectPath(database) = %q, %v, want %q", got, err, wantDatabase)
 	}
 
 	bundle := bundleIdentityFor(t, []byte("bundle"))
-	wantBundle := "policy/dependency-policy/v1/" + bundle.DigestHex() + ".json"
+	wantBundle := "dependency-policy:v1:" + bundle.DigestHex() + ".json"
 	got, err = objectPath(bundle)
 	if err != nil || got != wantBundle {
 		t.Fatalf("objectPath(bundle) = %q, %v, want %q", got, err, wantBundle)
@@ -297,7 +298,7 @@ func TestMaterializeFailsClosedOnAnUnknownObject(t *testing.T) {
 	}
 }
 
-func TestResolveMatchesThePlatformEncodedInventoryName(t *testing.T) {
+func TestResolveMatchesThePlatformWireForm(t *testing.T) {
 	content := []byte("the pinned tool content")
 	identity := toolIdentityFor(t, content)
 	server := newChannelServer()
@@ -306,6 +307,10 @@ func TestResolveMatchesThePlatformEncodedInventoryName(t *testing.T) {
 		t.Fatalf("objectPath() error = %v", err)
 	}
 	server.serve(object, content)
+	// A foreign inventory entry whose filename carries an encoded slash proves
+	// the resolution decodes every listed name before the comparison and skips
+	// the entries that do not match the bound address.
+	server.names = append(server.names, "projects/p/locations/l/repositories/r/files/foreign:1:dir%2Ffile.json")
 
 	var downloadEscapedPath string
 	materializer := newTestMaterializer(t, doerFunc(func(req *http.Request) (*http.Response, error) {
@@ -319,11 +324,11 @@ func TestResolveMatchesThePlatformEncodedInventoryName(t *testing.T) {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
 	if err := materializer.Materialize(context.Background(), request); err != nil {
-		t.Fatalf("Materialize() error = %v, want the resolution over the platform-encoded inventory name", err)
+		t.Fatalf("Materialize() error = %v, want the resolution over the platform wire form", err)
 	}
-	wantDownload := "/v1/projects/p/locations/l/repositories/r/files/" + strings.ReplaceAll(object, "/", "%2F") + ":download"
+	wantDownload := "/v1/projects/p/locations/l/repositories/r/files/" + object + ":download"
 	if downloadEscapedPath != wantDownload {
-		t.Fatalf("download escaped path = %q, want the server-issued encoded resource name %q", downloadEscapedPath, wantDownload)
+		t.Fatalf("download escaped path = %q, want the server-issued resource name %q", downloadEscapedPath, wantDownload)
 	}
 }
 

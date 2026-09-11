@@ -308,17 +308,26 @@ func (m Materializer) resolve(ctx context.Context, object string) (string, error
 	return "", fmt.Errorf("tooling channel object %q not found in %q", object, m.repository)
 }
 
-// objectPath derives the registry object coordinate of the channel artifact
-// from its identity: the stored form carries the platform-safe
-// <algorithm>-<hex> digest notation.
+// objectPath derives the registry object address of the channel artifact from
+// its identity: the platform addresses a generic file as
+// <package>:<version>:<filename>, and the stored filename carries the
+// platform-safe <algorithm>-<hex> digest notation. The fail-closed domain
+// parse guarantees the segment forms, so the mapping is total for every bound
+// identity.
 func objectPath(identity domaintooling.Identity) (string, error) {
 	switch identity.Kind() {
 	case domaintooling.KindTool:
-		return "tooling/" + strings.Replace(identity.String(), "@sha256:", "@sha256-", 1), nil
+		// osv-scanner/<version>/<asset>
+		parts := strings.Split(identity.Path(), "/")
+		return parts[0] + ":" + parts[1] + ":" + parts[2] + "@sha256-" + identity.DigestHex(), nil
 	case domaintooling.KindDatabase:
-		return "tooling/" + identity.Path() + "/all-" + identity.DigestHex() + ".zip", nil
+		// osv-db/<ecosystem>
+		parts := strings.Split(identity.Path(), "/")
+		return parts[0] + ":" + parts[1] + ":all-" + identity.DigestHex() + ".zip", nil
 	case domaintooling.KindBundle:
-		return "policy/" + identity.Path() + "/" + identity.DigestHex() + ".json", nil
+		// dependency-policy/v1
+		parts := strings.Split(identity.Path(), "/")
+		return parts[0] + ":" + parts[1] + ":" + identity.DigestHex() + ".json", nil
 	default:
 		return "", fmt.Errorf("unknown tooling channel artifact kind %d", identity.Kind())
 	}
