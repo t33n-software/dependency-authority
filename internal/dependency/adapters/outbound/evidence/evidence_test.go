@@ -408,6 +408,24 @@ func TestTransportDownloadFailures(t *testing.T) {
 	}
 }
 
+func TestTransportDownloadCarriesTheMediaForm(t *testing.T) {
+	var gotURL string
+	store := newTestStore(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+		gotURL = req.URL.String()
+		return okResponse("file-content"), nil
+	}))
+	content, err := store.transport.download(context.Background(), "projects/p/locations/l/repositories/r/files/pkg:v1:a.json")
+	if err != nil {
+		t.Fatalf("download() error = %v", err)
+	}
+	if string(content) != "file-content" {
+		t.Fatalf("download() = %q, want file-content", content)
+	}
+	if !strings.HasSuffix(gotURL, ":download?alt=media") {
+		t.Fatalf("download URL = %q, want the alt=media download form", gotURL)
+	}
+}
+
 func TestTransportListFailures(t *testing.T) {
 	store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{Status: "403 Forbidden", StatusCode: 403, Body: io.NopCloser(strings.NewReader(""))}, nil

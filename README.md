@@ -68,7 +68,9 @@ implement the consumer-defined ports:
   snapshot database, CVSS v3 base scoring, and a conservative maximum score
   for vulnerabilities without a computable vector;
 - `artifactregistry`: the append-only candidate records store
-  (`Candidates`), the approved-zone publisher that uploads the
+  (`Candidates`) — its record reads download in the media form
+  (`?alt=media`), so the decoded content is the record bytes, never the
+  JSON envelope —, the approved-zone publisher that uploads the
   digest-proven module archive through the direct Artifact Registry Go
   module upload and proves the content identity before and after the
   publication (`promotion.ApprovedRegistry`), the package-scoped
@@ -77,7 +79,9 @@ implement the consumer-defined ports:
   the controlled intake boundary, proves it against the recorded
   candidate digest, and places it at the canonical content path for the scan;
 - `evidence`: the append-only evidence reference index
-  (`admission.EvidenceStore`, `revocation.EvidenceRecorder`);
+  (`admission.EvidenceStore`, `revocation.EvidenceRecorder`) — its trail
+  reads download in the media form (`?alt=media`), so the decoded content
+  is the record bytes, never the JSON envelope;
 - `tooling`: the read-only workload tooling channel consumer — at startup the
   scanning lanes materialize the pinned scanner tool, the scanner database
   snapshot, and the admission policy bundle from the evidence-zone generic
