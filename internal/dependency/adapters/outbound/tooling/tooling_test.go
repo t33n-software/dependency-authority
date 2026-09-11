@@ -312,10 +312,11 @@ func TestResolveMatchesThePlatformWireForm(t *testing.T) {
 	// the entries that do not match the bound address.
 	server.names = append(server.names, "projects/p/locations/l/repositories/r/files/foreign:1:dir%2Ffile.json")
 
-	var downloadEscapedPath string
+	var downloadEscapedPath, downloadMediaForm string
 	materializer := newTestMaterializer(t, doerFunc(func(req *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(req.URL.Path, ":download") {
 			downloadEscapedPath = req.URL.EscapedPath()
+			downloadMediaForm = req.URL.Query().Get("alt")
 		}
 		return server.do(req)
 	}))
@@ -329,6 +330,9 @@ func TestResolveMatchesThePlatformWireForm(t *testing.T) {
 	wantDownload := "/v1/projects/p/locations/l/repositories/r/files/" + object + ":download"
 	if downloadEscapedPath != wantDownload {
 		t.Fatalf("download escaped path = %q, want the server-issued resource name %q", downloadEscapedPath, wantDownload)
+	}
+	if downloadMediaForm != "media" {
+		t.Fatalf("download media form = %q, want the alt=media download form", downloadMediaForm)
 	}
 }
 
