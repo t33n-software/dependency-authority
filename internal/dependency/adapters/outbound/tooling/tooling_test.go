@@ -85,11 +85,15 @@ func newChannelServer() *channelServer {
 	return &channelServer{documents: make(map[string][]byte)}
 }
 
-// serve stores the content under the channel object path.
+// serve stores the content under the channel object path. The inventory lists
+// the platform wire form of the resource name — the file path URL-encoded
+// with the path slashes as %2F, as the Artifact Registry files.list response
+// carries it — while the download request path decodes back to the logical
+// form the documents are keyed by.
 func (s *channelServer) serve(object string, content []byte) {
 	name := "projects/p/locations/l/repositories/r/files/" + object
 	s.documents[name] = content
-	s.names = append(s.names, name)
+	s.names = append(s.names, "projects/p/locations/l/repositories/r/files/"+strings.ReplaceAll(object, "/", "%2F"))
 }
 
 func (s *channelServer) do(req *http.Request) (*http.Response, error) {
@@ -290,6 +294,49 @@ func TestMaterializeFailsClosedOnAnUnknownObject(t *testing.T) {
 	}
 	if err := materializer.Materialize(context.Background(), request); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("Materialize() error = %v, want the unknown object failure", err)
+	}
+}
+
+func TestResolveMatchesThePlatformEncodedInventoryName(t *testing.T) {
+	content := []byte("the pinned tool content")
+	identity := toolIdentityFor(t, content)
+	server := newChannelServer()
+	object, err := objectPath(identity)
+	if err != nil {
+		t.Fatalf("objectPath() error = %v", err)
+	}
+	server.serve(object, content)
+
+	var downloadEscapedPath string
+	materializer := newTestMaterializer(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, ":download") {
+			downloadEscapedPath = req.URL.EscapedPath()
+		}
+		return server.do(req)
+	}))
+	request, err := NewRequest(identity, filepath.Join(t.TempDir(), "tool", "osv-scanner"), 0o755)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	if err := materializer.Materialize(context.Background(), request); err != nil {
+		t.Fatalf("Materialize() error = %v, want the resolution over the platform-encoded inventory name", err)
+	}
+	wantDownload := "/v1/projects/p/locations/l/repositories/r/files/" + strings.ReplaceAll(object, "/", "%2F") + ":download"
+	if downloadEscapedPath != wantDownload {
+		t.Fatalf("download escaped path = %q, want the server-issued encoded resource name %q", downloadEscapedPath, wantDownload)
+	}
+}
+
+func TestResolveFailsClosedOnAMalformedInventoryName(t *testing.T) {
+	server := newChannelServer()
+	server.names = append(server.names, "projects/p/locations/l/repositories/r/files/tooling%zz")
+	materializer := newTestMaterializer(t, doerFunc(server.do))
+	request, err := NewRequest(toolIdentityFor(t, []byte("content")), filepath.Join(t.TempDir(), "tool"), 0o755)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	if err := materializer.Materialize(context.Background(), request); err == nil || !strings.Contains(err.Error(), "decode the inventory resource name") {
+		t.Fatalf("Materialize() error = %v, want the inventory name decode failure", err)
 	}
 }
 

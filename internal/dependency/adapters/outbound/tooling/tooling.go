@@ -286,7 +286,10 @@ func (m Materializer) fetch(ctx context.Context, object string) ([]byte, error) 
 }
 
 // resolve binds the channel object to its server-issued resource name through
-// the repository file inventory.
+// the repository file inventory. The platform carries the file path
+// URL-encoded in the inventory resource name (the path slashes as %2F), so
+// the comparison runs on the canonical decoded form while the download keeps
+// the server-issued name. A malformed escape fails closed.
 func (m Materializer) resolve(ctx context.Context, object string) (string, error) {
 	want := m.repository + "/files/" + object
 	files, err := m.transport.list(ctx, m.repository)
@@ -294,7 +297,11 @@ func (m Materializer) resolve(ctx context.Context, object string) (string, error
 		return "", err
 	}
 	for _, file := range files {
-		if file.Name == want {
+		decoded, err := url.PathUnescape(file.Name)
+		if err != nil {
+			return "", fmt.Errorf("decode the inventory resource name %q: %w", file.Name, err)
+		}
+		if decoded == want {
 			return file.Name, nil
 		}
 	}
