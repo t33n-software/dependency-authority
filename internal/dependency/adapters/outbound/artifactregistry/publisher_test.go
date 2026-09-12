@@ -66,10 +66,13 @@ func digestOf(content []byte) string {
 
 // publisherFixture binds a fake transport that serves the intake and approved
 // archives by host and the module upload and upload-operation reads of the
-// Artifact Registry API surface.
+// Artifact Registry API surface. The approved host reports the module as
+// absent until an upload landed, unless approvedPresent binds the already
+// published form.
 type publisherFixture struct {
 	intakeArchive   []byte
 	approvedArchive []byte
+	approvedPresent bool
 	intakeStatus    int
 	approvedStatus  int
 	transportErr    error
@@ -100,6 +103,9 @@ func (f *publisherFixture) do(req *http.Request) (*http.Response, error) {
 		}
 		return okResponse(string(f.intakeArchive)), nil
 	case "approved.example.com":
+		if !f.approvedPresent && f.uploads == 0 {
+			return &http.Response{Status: "404 Not Found", StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
 		if f.approvedStatus != 0 {
 			return &http.Response{Status: "approved failure", StatusCode: f.approvedStatus, Body: io.NopCloser(strings.NewReader(""))}, nil
 		}
@@ -388,8 +394,12 @@ func TestPublishUploadOperationFailures(t *testing.T) {
 	t.Run("operation error state", func(t *testing.T) {
 		fixture := &publisherFixture{intakeArchive: archive, operationBody: `{"name":"projects/p/locations/l/operations/op-1","done":true,"error":{"code":13,"message":"broken"}}`}
 		publisher := newPublisher(t, doerFunc(fixture.do))
-		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+		err := publisher.Publish(context.Background(), subject, nil)
+		if err == nil {
 			t.Fatal("Publish() error = nil, want operation error")
+		}
+		if errors.Is(err, errModuleAlreadyExists) {
+			t.Fatalf("Publish() error = %v, want the non-ALREADY_EXISTS operation error to stay fail-closed", err)
 		}
 	})
 
@@ -441,6 +451,151 @@ func TestPublishApprovedFetchFailure(t *testing.T) {
 	subject := publishableCandidate(t, archive)
 	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
 		t.Fatal("Publish() error = nil, want approved fetch error")
+	}
+}
+
+func TestPublishSkipsTheProvenExistingModule(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	fixture := &publisherFixture{intakeArchive: archive, approvedArchive: archive, approvedPresent: true}
+	publisher := newPublisher(t, doerFunc(fixture.do))
+
+	subject := publishableCandidate(t, archive)
+	if err := publisher.Publish(context.Background(), subject, []evidence.Reference{}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if fixture.uploads != 0 {
+		t.Fatalf("uploads = %d, want 0 (the proven existing content is a skip, never an overwrite)", fixture.uploads)
+	}
+	if fixture.polls != 0 {
+		t.Fatalf("polls = %d, want 0 (no upload operation was started)", fixture.polls)
+	}
+}
+
+func TestPublishRejectsTheDriftedExistingModule(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	drifted := moduleZip(t, "example.com/mod@v1.0.0/", map[string]string{
+		"go.mod":  "module example.com/mod\n\ngo 1.26\n",
+		"mod.go":  "package mod\n",
+		"evil.go": "package mod\n",
+	})
+	fixture := &publisherFixture{intakeArchive: archive, approvedArchive: drifted, approvedPresent: true}
+	publisher := newPublisher(t, doerFunc(fixture.do))
+
+	subject := publishableCandidate(t, archive)
+	err := publisher.Publish(context.Background(), subject, nil)
+	if err == nil {
+		t.Fatal("Publish() error = nil, want the approved content digest anomaly")
+	}
+	if !strings.Contains(err.Error(), "does not match the candidate digest") {
+		t.Fatalf("Publish() error = %v, want the approved content digest anomaly", err)
+	}
+	if fixture.uploads != 0 {
+		t.Fatalf("uploads = %d, want 0 (the drifted existing content is never overwritten)", fixture.uploads)
+	}
+}
+
+func TestPublishVerifyFirstReadFailure(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	fixture := &publisherFixture{intakeArchive: archive, approvedPresent: true, approvedStatus: http.StatusInternalServerError}
+	publisher := newPublisher(t, doerFunc(fixture.do))
+
+	subject := publishableCandidate(t, archive)
+	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+		t.Fatal("Publish() error = nil, want the verify-first read failure")
+	}
+	if fixture.uploads != 0 {
+		t.Fatalf("uploads = %d, want 0 (a publication never happens against an unread target state)", fixture.uploads)
+	}
+}
+
+func TestPublishAlreadyExistsRace(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	subject := publishableCandidate(t, archive)
+	operationError := `{"name":"projects/p/locations/l/operations/op-1","done":true,"error":{"code":6,"message":"Requested entity already exists"}}`
+
+	t.Run("matching raced content completes the proof", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, approvedArchive: archive, operationBody: operationError}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err != nil {
+			t.Fatalf("Publish() error = %v, want the race guard to complete the content proof", err)
+		}
+		if fixture.uploads != 1 {
+			t.Fatalf("uploads = %d, want 1", fixture.uploads)
+		}
+	})
+
+	t.Run("drifted raced content fails closed", func(t *testing.T) {
+		drifted := moduleZip(t, "example.com/mod@v1.0.0/", map[string]string{"go.mod": "module example.com/mod\n"})
+		fixture := &publisherFixture{intakeArchive: archive, approvedArchive: drifted, operationBody: operationError}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		err := publisher.Publish(context.Background(), subject, nil)
+		if err == nil {
+			t.Fatal("Publish() error = nil, want the raced content digest anomaly")
+		}
+		if !strings.Contains(err.Error(), "does not match the candidate digest") {
+			t.Fatalf("Publish() error = %v, want the raced content digest anomaly", err)
+		}
+	})
+
+	t.Run("the raced re-read failure fails closed", func(t *testing.T) {
+		fixture := &publisherFixture{intakeArchive: archive, approvedStatus: http.StatusInternalServerError, operationBody: operationError}
+		publisher := newPublisher(t, doerFunc(fixture.do))
+		if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+			t.Fatal("Publish() error = nil, want the raced re-read failure")
+		}
+	})
+}
+
+func TestPublishPropagatesTheApprovedWorkspaceFailure(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	calls := 0
+	publisher, err := NewPublisher(
+		newTestClient(t, doerFunc((&publisherFixture{intakeArchive: archive, approvedArchive: archive}).do)),
+		"https://intake.example.com/p/r",
+		"https://approved.example.com/p/r",
+		"projects/p/locations/l/repositories/r",
+		func() (string, func(), error) {
+			calls++
+			if calls > 1 {
+				return "", nil, errors.New("no workspace")
+			}
+			return t.TempDir(), func() {}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewPublisher() error = %v", err)
+	}
+	subject := publishableCandidate(t, archive)
+	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+		t.Fatal("Publish() error = nil, want the approved workspace failure")
+	}
+}
+
+func TestPublishRejectsTheApprovedTreeMismatch(t *testing.T) {
+	archive := moduleZip(t, "example.com/mod@v1.0.0/", archiveContent)
+	fixture := &publisherFixture{intakeArchive: archive, approvedArchive: archive}
+	publisher := newPublisher(t, doerFunc(fixture.do))
+	subject := publishableCandidate(t, archive)
+
+	original := readModuleFile
+	t.Cleanup(func() { readModuleFile = original })
+	reads := 0
+	readModuleFile = func(name string) ([]byte, error) {
+		reads++
+		if reads >= 3 {
+			return []byte("drifted"), nil
+		}
+		return os.ReadFile(name)
+	}
+	if err := publisher.Publish(context.Background(), subject, nil); err == nil {
+		t.Fatal("Publish() error = nil, want the approved content identity mismatch")
+	}
+}
+
+func TestModuleNotFoundError(t *testing.T) {
+	err := &moduleNotFoundError{name: "example.com/mod", version: "v1.0.0", host: "approved.example.com"}
+	if got := err.Error(); got != `module archive example.com/mod v1.0.0 not found at "approved.example.com"` {
+		t.Fatalf("moduleNotFoundError.Error() = %q, want the proven absence form", got)
 	}
 }
 

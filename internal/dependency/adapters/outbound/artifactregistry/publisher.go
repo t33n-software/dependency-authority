@@ -70,10 +70,16 @@ func NewPublisher(client Client, intakeEndpoint string, approvedEndpoint string,
 }
 
 // Publish moves the candidate's verified module content from the intake
-// boundary into the approved repository. The evidence trail parameter is the
-// audit context of the promotion; the publication proof binds the content
-// itself. The method never rebuilds the module and never resolves a new
-// graph.
+// boundary into the approved repository and proves the Go content identity
+// before and after the publication. The approved target state is verified
+// before any write: an already present module version is proven against the
+// intake-bound content, identical content is a proven skip, and drifted
+// content fails closed — the approved content is never overwritten. An
+// ALREADY_EXISTS upload outcome is the race guard of a concurrent
+// publication and routes into the same content proof. The evidence trail
+// parameter is the audit context of the promotion; the publication proof
+// binds the content itself. The method never rebuilds the module and never
+// resolves a new graph.
 func (p Publisher) Publish(ctx context.Context, subject candidate.Candidate, _ []evidence.Reference) error {
 	intakeArchive, err := p.fetchArchive(ctx, p.intake, subject)
 	if err != nil {
@@ -93,33 +99,68 @@ func (p Publisher) Publish(ctx context.Context, subject candidate.Candidate, _ [
 		return fmt.Errorf("hash materialized module before publication: %w", err)
 	}
 
-	if err := p.upload(ctx, intakeArchive); err != nil {
+	approvedArchive, found, err := p.fetchApprovedArchive(ctx, subject)
+	if err != nil {
 		return err
+	}
+	if found {
+		return p.proveApprovedContent(subject, approvedArchive, preHash)
 	}
 
-	approvedArchive, err := p.fetchArchive(ctx, p.approved, subject)
+	if err := p.upload(ctx, intakeArchive); err != nil {
+		if !errors.Is(err, errModuleAlreadyExists) {
+			return err
+		}
+		// The race guard: a concurrent publication landed between the
+		// verify-first read and the upload, so the now-present content passes
+		// the same proof instead of failing the retryable operation.
+		racedArchive, raceErr := p.fetchArchive(ctx, p.approved, subject)
+		if raceErr != nil {
+			return raceErr
+		}
+		return p.proveApprovedContent(subject, racedArchive, preHash)
+	}
+
+	publishedArchive, err := p.fetchArchive(ctx, p.approved, subject)
 	if err != nil {
 		return err
 	}
-	published, cleanupPublished, err := p.materialize(subject, approvedArchive)
-	if err != nil {
-		return err
-	}
-	defer cleanupPublished()
-	postHash, err := dirhash(published)
-	if err != nil {
-		return fmt.Errorf("hash materialized module after publication: %w", err)
-	}
-	if preHash != postHash {
-		return fmt.Errorf("content identity mismatch after publication: %q != %q", postHash, preHash)
-	}
-	return nil
+	return p.proveApprovedContent(subject, publishedArchive, preHash)
 }
 
 // fetchArchive downloads the module archive through the bound Go proxy
 // endpoint of the given zone.
 func (p Publisher) fetchArchive(ctx context.Context, endpoint *url.URL, subject candidate.Candidate) ([]byte, error) {
 	return fetchModuleArchive(ctx, p.client, endpoint, subject.Name(), subject.Version())
+}
+
+// fetchApprovedArchive downloads the module archive from the approved zone. A
+// proven absence of the module version is reported as found=false; every read
+// failure fails closed, so a publication never happens against an unread
+// target state.
+func (p Publisher) fetchApprovedArchive(ctx context.Context, subject candidate.Candidate) ([]byte, bool, error) {
+	content, err := p.fetchArchive(ctx, p.approved, subject)
+	if err == nil {
+		return content, true, nil
+	}
+	var notFound *moduleNotFoundError
+	if errors.As(err, &notFound) {
+		return nil, false, nil
+	}
+	return nil, false, err
+}
+
+// moduleNotFoundError reports the proven absence of a module archive at a zone
+// endpoint. It lets the verify-first publication distinguish a proven absence
+// from a read failure without matching message text.
+type moduleNotFoundError struct {
+	name    string
+	version string
+	host    string
+}
+
+func (e *moduleNotFoundError) Error() string {
+	return fmt.Sprintf("module archive %s %s not found at %q", e.name, e.version, e.host)
 }
 
 // fetchModuleArchive downloads the module archive through the bound Go proxy
@@ -131,7 +172,7 @@ func fetchModuleArchive(ctx context.Context, client Client, endpoint *url.URL, n
 		return nil, err
 	}
 	if status == http.StatusNotFound || status == http.StatusGone {
-		return nil, fmt.Errorf("module archive %s %s not found at %q", name, version, endpoint.Host)
+		return nil, &moduleNotFoundError{name: name, version: version, host: endpoint.Host}
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("fetch module archive from %q: unexpected status %d", endpoint.Host, status)
@@ -158,6 +199,30 @@ func (p Publisher) materialize(subject candidate.Candidate, archive []byte) (str
 		return "", nil, err
 	}
 	return root, cleanup, nil
+}
+
+// proveApprovedContent proves the content the approved zone serves against the
+// intake-bound module content: the archive digest must match the candidate
+// digest, and the extracted module tree must match the pre-publication hash.
+// Drifted content is a supply-chain anomaly and fails closed; the approved
+// content is never overwritten.
+func (p Publisher) proveApprovedContent(subject candidate.Candidate, approvedArchive []byte, preHash string) error {
+	if digest := archiveDigest(approvedArchive); digest != subject.Digest() {
+		return fmt.Errorf("approved content digest %q does not match the candidate digest %q", digest, subject.Digest())
+	}
+	published, cleanupPublished, err := p.materialize(subject, approvedArchive)
+	if err != nil {
+		return err
+	}
+	defer cleanupPublished()
+	postHash, err := dirhash(published)
+	if err != nil {
+		return fmt.Errorf("hash the materialized approved module: %w", err)
+	}
+	if preHash != postHash {
+		return fmt.Errorf("approved content identity mismatch: %q != %q", postHash, preHash)
+	}
+	return nil
 }
 
 // upload publishes the proven module archive to the approved repository
@@ -240,6 +305,16 @@ type operationError struct {
 // maxUploadPolls bounds the upload operation wait.
 const maxUploadPolls = 120
 
+// grpcAlreadyExists is the gRPC status code the module upload operation
+// reports when the approved zone already carries the module version.
+const grpcAlreadyExists = 6
+
+// errModuleAlreadyExists marks the raced publication: the approved zone
+// already carries the module version, so the upload operation completed with
+// ALREADY_EXISTS. The publisher routes it into the approved content proof
+// instead of failing the retryable operation.
+var errModuleAlreadyExists = errors.New("the approved zone already carries the module version")
+
 // pollInterval is the wait between upload operation polls; tests bind a
 // shorter interval.
 var pollInterval = time.Second
@@ -290,6 +365,9 @@ func (p Publisher) uploadDone(ctx context.Context, name string) (bool, error) {
 		return false, fmt.Errorf("decode the module upload operation %q: %w", name, err)
 	}
 	if operation.Error != nil {
+		if operation.Error.Code == grpcAlreadyExists {
+			return false, fmt.Errorf("the module upload operation failed: %d %s: %w", operation.Error.Code, operation.Error.Message, errModuleAlreadyExists)
+		}
 		return false, fmt.Errorf("the module upload operation failed: %d %s", operation.Error.Code, operation.Error.Message)
 	}
 	return operation.Done, nil
