@@ -75,7 +75,12 @@ implement the consumer-defined ports:
   JSON envelope —, the approved-zone publisher that uploads the
   digest-proven module archive through the direct Artifact Registry Go
   module upload and proves the content identity before and after the
-  publication (`promotion.ApprovedRegistry`), the package-scoped
+  publication (`promotion.ApprovedRegistry`) — verify-first and
+  idempotent: the approved target state is proven against the
+  intake-bound content before any write, an already present identical
+  module version is a proven skip, drifted content fails closed instead
+  of an overwrite, and an ALREADY_EXISTS upload outcome routes into the
+  same content proof as the race guard —, the package-scoped
   download-rule revocation gate (`revocation.DownloadGate`), and the
   candidate content materialization that fetches the module archive from
   the controlled intake boundary, proves it against the recorded
