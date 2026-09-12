@@ -66,7 +66,9 @@ implement the consumer-defined ports:
   ecosystem, or revocation-invariant deviation;
 - `scanner`: the offline OSV-Scanner adapter (`admission.Scanner`) with the
   snapshot database, CVSS v3 base scoring, and a conservative maximum score
-  for vulnerabilities without a computable vector;
+  for vulnerabilities without a computable vector; a fail-closed exit-code
+  error carries a bounded, single-line excerpt of the scanner diagnostics, so
+  a workload failure is diagnosable from the lane evidence;
 - `artifactregistry`: the append-only candidate records store
   (`Candidates`) — its record reads download in the media form
   (`?alt=media`), so the decoded content is the record bytes, never the

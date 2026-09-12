@@ -224,8 +224,94 @@ func TestExecRunner(t *testing.T) {
 	if failing.ExitCode == 0 {
 		t.Fatal("ExecRunner(go nosuchcommand) exit code = 0, want non-zero")
 	}
+	if !strings.Contains(string(failing.Stderr), "unknown command") {
+		t.Fatalf("ExecRunner(go nosuchcommand) stderr = %q, want the captured tool diagnostics", failing.Stderr)
+	}
 
 	if _, err := ExecRunner(context.Background(), ".", nil, "definitely-not-a-real-tool-xyz"); err == nil {
 		t.Fatal("ExecRunner( unknown tool ) error = nil, want start error")
+	}
+}
+
+func TestScanErrorCarriesTheScannerDiagnostics(t *testing.T) {
+	const diagnostics = "could not load db for Go ecosystem: no offline version of the OSV database is available"
+	adapter := newScanner(t, func(context.Context, string, []string, string, ...string) (Result, error) {
+		return Result{ExitCode: 127, Stderr: []byte(diagnostics)}, nil
+	})
+	_, err := adapter.Scan(context.Background(), testCandidate(t, "example.com/mod"))
+	if err == nil {
+		t.Fatal("Scan() error = nil, want the fail-closed exit-code error")
+	}
+	want := "scanner exited with code 127: " + diagnostics
+	if err.Error() != want {
+		t.Fatalf("Scan() error = %q, want %q — the scanner diagnostics must reach the lane evidence", err.Error(), want)
+	}
+}
+
+func TestScanErrorWithoutDiagnosticsKeepsTheBareForm(t *testing.T) {
+	for _, stderr := range []string{"", " \n\t "} {
+		adapter := newScanner(t, func(context.Context, string, []string, string, ...string) (Result, error) {
+			return Result{ExitCode: 2, Stderr: []byte(stderr)}, nil
+		})
+		_, err := adapter.Scan(context.Background(), testCandidate(t, "example.com/mod"))
+		if err == nil {
+			t.Fatal("Scan() error = nil, want the fail-closed exit-code error")
+		}
+		if want := "scanner exited with code 2"; err.Error() != want {
+			t.Fatalf("Scan() error = %q, want the bare form %q without diagnostics", err.Error(), want)
+		}
+	}
+}
+
+func TestScanSuccessIgnoresDiagnostics(t *testing.T) {
+	adapter := newScanner(t, func(context.Context, string, []string, string, ...string) (Result, error) {
+		return Result{Stdout: []byte(`{"results": []}`), ExitCode: 0, Stderr: []byte("progress noise")}, nil
+	})
+	result, err := adapter.Scan(context.Background(), testCandidate(t, "example.com/mod"))
+	if err != nil {
+		t.Fatalf("Scan() error = %v, want success — diagnostics never fail a successful scan", err)
+	}
+	if result.MaxCVSS != 0 {
+		t.Fatalf("MaxCVSS = %v, want 0", result.MaxCVSS)
+	}
+}
+
+func TestStderrExcerpt(t *testing.T) {
+	overCap := strings.Repeat("x", stderrExcerptRunes+10)
+	tests := map[string]struct {
+		stderr string
+		want   string
+	}{
+		"empty":              {"", ""},
+		"whitespace only":    {" \n\t\n ", ""},
+		"short diagnostic":   {"could not load db", ": could not load db"},
+		"multiline collapse": {"first line\nsecond line\n", ": first line second line"},
+		"over cap":           {overCap, ": " + strings.Repeat("x", stderrExcerptRunes) + "…"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := stderrExcerpt([]byte(test.stderr)); got != test.want {
+				t.Fatalf("stderrExcerpt() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestBoundedBuffer(t *testing.T) {
+	buffer := &boundedBuffer{limit: 8}
+	if n, err := buffer.Write([]byte("abcd")); err != nil || n != 4 {
+		t.Fatalf("Write(short) = (%d, %v), want (4, nil)", n, err)
+	}
+	if n, err := buffer.Write([]byte("efghijkl")); err != nil || n != 8 {
+		t.Fatalf("Write(over-cap) = (%d, %v), want (8, nil) — the child never blocks on the discarded tail", n, err)
+	}
+	if got := buffer.buf.String(); got != "abcdefgh" {
+		t.Fatalf("retained = %q, want the bounded head %q", got, "abcdefgh")
+	}
+	if n, err := buffer.Write([]byte("more")); err != nil || n != 4 {
+		t.Fatalf("Write(at-cap) = (%d, %v), want (4, nil)", n, err)
+	}
+	if got := buffer.buf.String(); got != "abcdefgh" {
+		t.Fatalf("retained after the at-cap write = %q, want the unchanged bounded head", got)
 	}
 }

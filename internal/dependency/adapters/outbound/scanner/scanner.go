@@ -28,9 +28,20 @@ const databaseLocationEnv = "OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY"
 // instead of an unproven pass.
 const conservativeScore = 10.0
 
+// stderrCaptureBytes bounds the scanner diagnostics retained from the child
+// process, so a verbose or looping tool can never exhaust memory.
+const stderrCaptureBytes = 4096
+
+// stderrExcerptRunes bounds the single-line diagnostics excerpt the fail-closed
+// error chain carries.
+const stderrExcerptRunes = 200
+
 // Result carries the process outcome of a scan execution.
 type Result struct {
-	Stdout   []byte
+	Stdout []byte
+	// Stderr carries the scanner diagnostics captured up to stderrCaptureBytes;
+	// the fail-closed error path reduces them to a bounded excerpt.
+	Stderr   []byte
 	ExitCode int
 }
 
@@ -77,7 +88,7 @@ func (o OSV) Scan(ctx context.Context, subject candidate.Candidate) (admission.S
 		return admission.ScanResult{}, fmt.Errorf("execute scanner: %w", err)
 	}
 	if result.ExitCode != 0 && result.ExitCode != 1 {
-		return admission.ScanResult{}, fmt.Errorf("scanner exited with code %d", result.ExitCode)
+		return admission.ScanResult{}, fmt.Errorf("scanner exited with code %d%s", result.ExitCode, stderrExcerpt(result.Stderr))
 	}
 
 	output, err := decode(result.Stdout)
@@ -165,20 +176,57 @@ func vulnerabilityScore(severities []struct {
 }
 
 // ExecRunner executes the pinned tool as a child process. A non-zero exit
-// code is a result, not an error; only a failed start is an error.
+// code is a result, not an error; only a failed start is an error. The tool
+// diagnostics on standard error are captured up to stderrCaptureBytes.
 func ExecRunner(ctx context.Context, dir string, env []string, name string, args ...string) (Result, error) {
 	command := exec.CommandContext(ctx, name, args...)
 	command.Dir = dir
 	command.Env = append(os.Environ(), env...)
 	var stdout bytes.Buffer
 	command.Stdout = &stdout
+	stderr := &boundedBuffer{limit: stderrCaptureBytes}
+	command.Stderr = stderr
 	err := command.Run()
 	if err == nil {
-		return Result{Stdout: stdout.Bytes(), ExitCode: 0}, nil
+		return Result{Stdout: stdout.Bytes(), Stderr: stderr.buf.Bytes(), ExitCode: 0}, nil
 	}
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
-		return Result{Stdout: stdout.Bytes(), ExitCode: exitError.ExitCode()}, nil
+		return Result{Stdout: stdout.Bytes(), Stderr: stderr.buf.Bytes(), ExitCode: exitError.ExitCode()}, nil
 	}
 	return Result{}, err
+}
+
+// stderrExcerpt reduces the captured scanner diagnostics to a single-line,
+// length-bounded excerpt for the fail-closed error chain: whitespace runs
+// collapse to single spaces so no control characters reach the logs, and the
+// excerpt carries only the tool's own diagnostic text — never environment,
+// argument, or credential material.
+func stderrExcerpt(stderr []byte) string {
+	text := strings.Join(strings.Fields(string(stderr)), " ")
+	if text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) > stderrExcerptRunes {
+		text = string(runes[:stderrExcerptRunes]) + "…"
+	}
+	return ": " + text
+}
+
+// boundedBuffer is an io.Writer that retains at most the first limit bytes
+// written to it; every write reports full consumption so the child process
+// never blocks on a discarded tail.
+type boundedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+// Write retains the head of p up to the remaining capacity and reports p as
+// fully consumed.
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if remaining := b.limit - b.buf.Len(); remaining > 0 {
+		b.buf.Write(p[:min(len(p), remaining)])
+	}
+	return len(p), nil
 }
