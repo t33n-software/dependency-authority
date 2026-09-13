@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // bindingManifest mirrors the tenant binding manifest (repo-bindings/v1) for
@@ -715,6 +716,95 @@ func TestControllerImageSubstrateBindsTheGovernedBuildForm(t *testing.T) {
 	if !strings.Contains(traceability, "DA-16") {
 		t.Fatal("TRACEABILITY.md does not contain DA-16")
 	}
+}
+
+// TestGoDistributionPinBindsTheToolchainDirective binds the distribution pin
+// of the toolchain-bearing image variant (GO-SCF-019, GO-AT-32): the pin is a
+// versioned product-source file at the repository root whose version is
+// fail-closed coupled to the toolchain directive of go.mod, whose publisher
+// checksum is well-formed, and whose staging form is bound in the substrate
+// runbook — never an instance binding, never a floating download.
+func TestGoDistributionPinBindsTheToolchainDirective(t *testing.T) {
+	var pin struct {
+		SchemaVersion int `json:"schemaVersion"`
+		Distribution  struct {
+			Version                 string `json:"version"`
+			Artifact                string `json:"artifact"`
+			Checksum                string `json:"checksum"`
+			SizeBytes               int64  `json:"sizeBytes"`
+			PublisherReleaseChannel string `json:"publisherReleaseChannel"`
+			ProvenAt                string `json:"provenAt"`
+		} `json:"distribution"`
+	}
+	if err := json.Unmarshal([]byte(readRepositoryFile(t, "go-distribution-pin.json")), &pin); err != nil {
+		t.Fatalf("go-distribution-pin.json is not valid JSON: %v", err)
+	}
+	if pin.SchemaVersion != 1 {
+		t.Fatalf("go-distribution-pin.json carries schemaVersion %d, want 1", pin.SchemaVersion)
+	}
+
+	directive := goModToolchainDirective(t)
+	if pin.Distribution.Version != directive {
+		t.Fatalf("the distribution pin version %q deviates from the toolchain directive %q of go.mod", pin.Distribution.Version, directive)
+	}
+	if want := directive + ".linux-amd64.tar.gz"; pin.Distribution.Artifact != want {
+		t.Fatalf("the distribution pin artifact %q does not match the pinned version form %q", pin.Distribution.Artifact, want)
+	}
+	checksum, found := strings.CutPrefix(pin.Distribution.Checksum, "sha256:")
+	if !found || len(checksum) != 64 || !isHex(checksum) {
+		t.Fatalf("the distribution pin checksum %q is not the well-formed sha256:<64 hex> form", pin.Distribution.Checksum)
+	}
+	if pin.Distribution.SizeBytes <= 0 {
+		t.Fatalf("the distribution pin carries no positive size evidence, got %d", pin.Distribution.SizeBytes)
+	}
+	if pin.Distribution.PublisherReleaseChannel != "https://go.dev/dl/" {
+		t.Fatalf("the distribution pin binds publisher release channel %q, want the publisher release channel of the Go distribution", pin.Distribution.PublisherReleaseChannel)
+	}
+	if _, err := time.Parse("2006-01-02", pin.Distribution.ProvenAt); err != nil {
+		t.Fatalf("the distribution pin provenance date %q is not the YYYY-MM-DD form: %v", pin.Distribution.ProvenAt, err)
+	}
+
+	runbook := readRepositoryFile(t, filepath.Join("docs", "operations", "controller-image-substrate.md"))
+	for _, required := range []string{
+		"go-distribution-pin.json",
+		".build/toolchain/go/",
+		"against the pinned publisher checksum",
+		"bootstrap era",
+	} {
+		if !strings.Contains(runbook, required) {
+			t.Fatalf("the controller image runbook does not bind the distribution pin staging form %q", required)
+		}
+	}
+	// Regression guard (DA-33): the distribution identity is a product-source
+	// pin coupled to the toolchain directive; the retired instance-binding
+	// form must never return.
+	if strings.Contains(runbook, "organization instance") {
+		t.Fatal("the controller image runbook still carries the retired instance-binding form of the distribution pin")
+	}
+
+	readme := readRepositoryFile(t, "README.md")
+	if !strings.Contains(readme, "go-distribution-pin.json") {
+		t.Fatal("README.md does not document the distribution pin in the repository layout")
+	}
+
+	traceability := readRepositoryFile(t, filepath.Join("docs", "TRACEABILITY.md"))
+	if !strings.Contains(traceability, "DA-33") {
+		t.Fatal("TRACEABILITY.md does not contain DA-33")
+	}
+}
+
+// goModToolchainDirective extracts the version token of the toolchain
+// directive of go.mod; the distribution pin is coupled to exactly this token.
+func goModToolchainDirective(t *testing.T) string {
+	t.Helper()
+	for _, line := range strings.Split(readRepositoryFile(t, "go.mod"), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "toolchain" {
+			return fields[1]
+		}
+	}
+	t.Fatal("go.mod does not carry a toolchain directive")
+	return ""
 }
 
 func readRepositoryFile(t *testing.T, path string) string {
