@@ -238,6 +238,10 @@ every shared-line change.
   (GO-SCF-019): the pure packaging of a locally built controller binary on
   the digest-pinned minimal non-root runtime; the build and delivery
   procedure lives in `docs/operations/controller-image-substrate.md`.
+- `go-distribution-pin.json` binds the Go distribution identity of the
+  toolchain-bearing image variant (the exact version, the artifact name, the
+  publisher checksum, the size, and the provenance date), coupled fail-closed
+  to the `toolchain` directive of `go.mod` through the packaging contract.
 - `internal/dependency/domain/` contains the lifecycle, admission, approval,
   quarantine, revocation, tooling, verification, and evidence domain models.
 - `internal/dependency/application/` contains the six lane use cases.

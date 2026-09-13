@@ -21,7 +21,8 @@ release class.
   variant: it additionally carries the pinned Go distribution tree under
   `/toolchain/` (bound as `DEPENDENCY_AUTHORITY_GO_TOOL=/toolchain/bin/go`),
   staged at build time from the publisher's release channel and proven
-  against the publisher's checksums — never a floating download. The variant
+  against the pinned publisher checksum of `go-distribution-pin.json` —
+  never a floating download. The variant
   is packaged through the same parameterized `Dockerfile` with
   `--build-arg TOOLCHAIN=go`; every other controller builds with the default
   `TOOLCHAIN=none`, which copies the empty `.build/toolchain/none/` tree.
@@ -64,14 +65,24 @@ go build -trimpath -ldflags="-s -w" \
 For the toolchain-bearing variant (the consumer verification controller),
 additionally stage the pinned Go distribution tree and prove it fail-closed
 against the publisher's checksums before packaging — the pinned distribution
-version and its publisher checksum digest are bound by the organization
-instance, never guessed:
+version and its publisher checksum digest are bound with the product source
+in `go-distribution-pin.json` at the repository root, coupled fail-closed to
+the `toolchain` directive of `go.mod` through the packaging contract, never
+an instance binding, never guessed:
 
 ```text
-# fetch the pinned Go distribution archive from the publisher's release
-# channel, prove its SHA-256 against the bound publisher checksum, and unpack
-# it to .build/toolchain/go/ so the image carries exactly the proven tree
+# read the bound distribution identity from go-distribution-pin.json, fetch
+# the pinned artifact from the publisher's release channel, prove its SHA-256
+# against the pinned publisher checksum, and unpack it to
+# .build/toolchain/go/ so the image carries exactly the proven tree
 ```
+
+In the bootstrap era the pinned artifact is fetched from the publisher's
+release channel through the governed operator channel; the steady-state
+channel serves the onboarded, proven artifact from the organization's
+internal tooling channel without changing the binding form — the publisher
+checksum remains the integrity anchor in every era, because the internal
+channel distributes proven bytes and never issues the upstream proof.
 
 For every other controller the build procedure creates the empty
 `.build/toolchain/none/` tree, so the parameterized `COPY` succeeds without
@@ -117,5 +128,7 @@ docker run --rm <image> --version
 The packaging contract tests bind the substrate fail-closed: the
 digest-pinned base, the `ARG CONTROLLER` parametrization, the `ARG TOOLCHAIN`
 variant form, the non-root user, the absent syntax frontend reference, the
-six controller names, and the bindings of this runbook. The governed quality
+six controller names, the distribution pin of the toolchain-bearing variant
+(fail-closed coupled to the `toolchain` directive of `go.mod`), and the
+bindings of this runbook. The governed quality
 gate runs them on every shared-line change.

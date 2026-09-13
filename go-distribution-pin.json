@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "distribution": {
+    "version": "go1.26.6",
+    "artifact": "go1.26.6.linux-amd64.tar.gz",
+    "checksum": "sha256:708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89",
+    "sizeBytes": 66890545,
+    "publisherReleaseChannel": "https://go.dev/dl/",
+    "provenAt": "2026-09-13"
+  }
+}
