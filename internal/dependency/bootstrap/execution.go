@@ -15,6 +15,7 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/policy"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/scanner"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/consumerverification"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/revalidation"
@@ -24,14 +25,16 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 	domaintooling "github.com/t33n-software/dependency-authority/internal/dependency/domain/tooling"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/verification"
 )
 
 // Evidence schema versions of the lane-produced evidence documents.
 const (
-	scanEvidenceSchema       = "dependency-authority/scan-evidence/v1"
-	decisionEvidenceSchema   = "dependency-authority/admission-decision/v1"
-	approvalEvidenceSchema   = "dependency-authority/approval/v1"
-	revocationEvidenceSchema = "dependency-authority/revocation/v1"
+	scanEvidenceSchema                 = "dependency-authority/scan-evidence/v1"
+	decisionEvidenceSchema             = "dependency-authority/admission-decision/v1"
+	approvalEvidenceSchema             = "dependency-authority/approval/v1"
+	revocationEvidenceSchema           = "dependency-authority/revocation/v1"
+	consumerVerificationEvidenceSchema = "dependency-authority/consumer-verification/v1"
 )
 
 // EvidenceJournal is the evidence-zone write capability the lane execution
@@ -63,6 +66,8 @@ func operationFields(operation Operation) []config.Field {
 		return []config.Field{config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity}
 	case OperationRevocation:
 		return []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldRevocationReason}
+	case OperationConsumerVerification:
+		return []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe}
 	default:
 		return nil
 	}
@@ -81,6 +86,8 @@ func execute(ctx context.Context, operation Operation, service any, ports Ports,
 		return executeRevalidation(ctx, service.(revalidation.Service), ports, controllerConfig, operationInput, lookup, stdout)
 	case OperationRevocation:
 		return executeRevocation(ctx, service.(revocation.Service), ports, controllerConfig, operationInput, stdout)
+	case OperationConsumerVerification:
+		return executeConsumerVerification(ctx, service.(consumerverification.Service), ports, controllerConfig, operationInput, stdout)
 	default:
 		return fmt.Errorf("unknown operation %q", operation)
 	}
@@ -308,6 +315,50 @@ func executeRevocation(ctx context.Context, service revocation.Service, ports Po
 	}
 	fmt.Fprintf(stdout, "dependency-revocation-controller: candidate %s %s %s state=revoked download_block=%t\n",
 		ecosystem, name, version, decision.DownloadBlock())
+	return nil
+}
+
+// executeConsumerVerification proves the consumer contract for the admitted
+// module version against the live approved endpoint and records the
+// verification evidence — the pass report, or the failed proof. A failed
+// consumer-contract proof is supply-chain-relevant evidence: the lane records
+// it before it fails closed.
+func executeConsumerVerification(ctx context.Context, service consumerverification.Service, ports Ports, controllerConfig config.Config, operationInput config.Operation, stdout io.Writer) error {
+	ecosystem := controllerConfig.Ecosystem()
+	name := operationInput.Module()
+	version := operationInput.Version()
+
+	journal, err := journalOf(ports)
+	if err != nil {
+		return err
+	}
+
+	current, found, err := ports.Candidates.Find(ctx, ecosystem, name, version)
+	if err != nil {
+		return fmt.Errorf("load candidate: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("candidate %s %s not found", name, version)
+	}
+
+	report, err := service.Verify(ctx, ecosystem, name, version, operationInput.NegativeProbe())
+	if err != nil {
+		var proofError *verification.ProofError
+		if errors.As(err, &proofError) {
+			now := ports.Now()
+			if _, recordErr := produceEvidence(ctx, journal, current, evidence.TypeVerification, operationInput.LaneIdentity(), consumerVerificationFailureEvidence(ecosystem, name, version, operationInput.LaneIdentity(), proofError, now), now, nil); recordErr != nil {
+				return recordErr
+			}
+		}
+		return err
+	}
+
+	now := ports.Now()
+	if _, err := produceEvidence(ctx, journal, current, evidence.TypeVerification, operationInput.LaneIdentity(), consumerVerificationEvidence(ecosystem, name, version, operationInput.LaneIdentity(), report, now), now, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "dependency-consumer-verification-controller: candidate %s %s %s verified proofs=%d\n",
+		ecosystem, name, version, len(report.Results()))
 	return nil
 }
 
@@ -549,6 +600,71 @@ func revocationEvidence(ecosystem candidate.Ecosystem, name string, version stri
 		Reason:    reason,
 		Issuer:    laneIdentity,
 		RevokedAt: now.UTC().Format(time.RFC3339Nano),
+	})
+	return content
+}
+
+// consumerVerificationProofDocument mirrors one proof result in the consumer
+// verification record.
+type consumerVerificationProofDocument struct {
+	Proof  string `json:"proof"`
+	Detail string `json:"detail"`
+}
+
+// consumerVerificationEvidenceDocument is the canonical consumer verification
+// evidence document: the pass record carries the five proof results, the
+// failure record carries the failed proof and its detail.
+type consumerVerificationEvidenceDocument struct {
+	Schema      string                              `json:"schema"`
+	Ecosystem   string                              `json:"ecosystem"`
+	Name        string                              `json:"name"`
+	Version     string                              `json:"version"`
+	Issuer      string                              `json:"issuer"`
+	Outcome     string                              `json:"outcome"`
+	Proofs      []consumerVerificationProofDocument `json:"proofs"`
+	FailedProof string                              `json:"failed_proof,omitempty"`
+	Detail      string                              `json:"detail,omitempty"`
+	IssuedAt    string                              `json:"issued_at"`
+}
+
+// consumerVerificationEvidence builds the canonical pass record of one
+// consumer verification.
+func consumerVerificationEvidence(ecosystem candidate.Ecosystem, name string, version string, laneIdentity string, report verification.Report, now time.Time) []byte {
+	proofs := make([]consumerVerificationProofDocument, 0, len(report.Results()))
+	for _, result := range report.Results() {
+		proofs = append(proofs, consumerVerificationProofDocument{Proof: string(result.Proof()), Detail: result.Detail()})
+	}
+	// The document carries only strings and structured proof entries, so
+	// marshaling cannot fail.
+	content, _ := json.Marshal(consumerVerificationEvidenceDocument{
+		Schema:    consumerVerificationEvidenceSchema,
+		Ecosystem: string(ecosystem),
+		Name:      name,
+		Version:   version,
+		Issuer:    laneIdentity,
+		Outcome:   "pass",
+		Proofs:    proofs,
+		IssuedAt:  now.UTC().Format(time.RFC3339Nano),
+	})
+	return content
+}
+
+// consumerVerificationFailureEvidence builds the canonical failure record of
+// one consumer verification: the failed proof and its detail.
+func consumerVerificationFailureEvidence(ecosystem candidate.Ecosystem, name string, version string, laneIdentity string, proofError *verification.ProofError, now time.Time) []byte {
+	// The document carries only strings and the empty proof list, so
+	// marshaling cannot fail.
+	content, _ := json.Marshal(consumerVerificationEvidenceDocument{
+		Schema:      consumerVerificationEvidenceSchema,
+		Ecosystem:   string(ecosystem),
+		Name:        name,
+		Version:     version,
+		Issuer:      laneIdentity,
+		Outcome:     "fail",
+		Proofs:      []consumerVerificationProofDocument{},
+		FailedProof: string(proofError.Proof()),
+		Detail:      proofError.Detail(),
+		IssuedAt:    now.UTC().Format(time.RFC3339Nano),
 	})
 	return content
 }

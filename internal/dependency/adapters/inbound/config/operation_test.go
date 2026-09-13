@@ -21,6 +21,7 @@ func fullOperationEnv() map[string]string {
 		EnvScannerDatabaseIdentity: "osv-db sha256:aaa",
 		EnvApprovalTTL:             "72h",
 		EnvRevocationReason:        "confirmed supply chain incident",
+		EnvNegativeProbe:           "example.invalid/never-admitted@v0.0.0",
 	}
 }
 
@@ -41,7 +42,7 @@ func TestOperationFromEnvLoadsTheTrimmedInputs(t *testing.T) {
 	if operation.Module() != "github.com/google/go-cmp" || operation.Version() != "v0.7.0" {
 		t.Fatalf("OperationFromEnv() = %q %q, want the trimmed inputs", operation.Module(), operation.Version())
 	}
-	if operation.LaneIdentity() != "" || operation.ScannerIdentity() != "" || operation.ScannerDatabaseIdentity() != "" || operation.RevocationReason() != "" {
+	if operation.LaneIdentity() != "" || operation.ScannerIdentity() != "" || operation.ScannerDatabaseIdentity() != "" || operation.RevocationReason() != "" || operation.NegativeProbe() != "" {
 		t.Fatal("OperationFromEnv() bound an absent input")
 	}
 	if operation.ApprovalTTL() != 0 {
@@ -51,7 +52,7 @@ func TestOperationFromEnvLoadsTheTrimmedInputs(t *testing.T) {
 
 func TestOperationFromEnvBindsEveryField(t *testing.T) {
 	operation, err := OperationFromEnv(operationEnv(fullOperationEnv()),
-		FieldModule, FieldVersion, FieldLaneIdentity, FieldScannerIdentity, FieldScannerDatabaseIdentity, FieldApprovalTTL, FieldRevocationReason)
+		FieldModule, FieldVersion, FieldLaneIdentity, FieldScannerIdentity, FieldScannerDatabaseIdentity, FieldApprovalTTL, FieldRevocationReason, FieldNegativeProbe)
 	if err != nil {
 		t.Fatalf("OperationFromEnv() error = %v", err)
 	}
@@ -75,6 +76,9 @@ func TestOperationFromEnvBindsEveryField(t *testing.T) {
 	}
 	if operation.RevocationReason() != "confirmed supply chain incident" {
 		t.Fatalf("RevocationReason() = %q", operation.RevocationReason())
+	}
+	if operation.NegativeProbe() != "example.invalid/never-admitted@v0.0.0" {
+		t.Fatalf("NegativeProbe() = %q", operation.NegativeProbe())
 	}
 }
 
@@ -103,6 +107,7 @@ func TestOperationFromEnvRequiresTheDeclaredFields(t *testing.T) {
 		"scanner identity":  {FieldScannerIdentity, EnvScannerIdentity},
 		"database identity": {FieldScannerDatabaseIdentity, EnvScannerDatabaseIdentity},
 		"revocation reason": {FieldRevocationReason, EnvRevocationReason},
+		"negative probe":    {FieldNegativeProbe, EnvNegativeProbe},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := OperationFromEnv(operationEnv(map[string]string{}), tc.field); err == nil {

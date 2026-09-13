@@ -63,6 +63,15 @@ func TestToolingChannelRequestsScopesTheLanes(t *testing.T) {
 		}
 	})
 
+	t.Run("consumer verification carries no channel scope", func(t *testing.T) {
+		// The lane executes the pinned toolchain its image carries; the
+		// tooling channel materializes nothing for it.
+		requests, err := toolingChannelRequests(OperationConsumerVerification, mustBindings(t, channelEnv(full)), envBinding(channelEnv(full)))
+		if err != nil || requests != nil {
+			t.Fatalf("toolingChannelRequests(consumer-verification) = %v, %v, want no scope", requests, err)
+		}
+	})
+
 	t.Run("admission without channel bindings carries no scope", func(t *testing.T) {
 		requests, err := toolingChannelRequests(OperationAdmission, mustBindings(t, channelEnv(nil)), envBinding(channelEnv(nil)))
 		if err != nil || requests != nil {

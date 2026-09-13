@@ -199,6 +199,7 @@ func TestLaneWorkflowsBindTheProtectedEnvironments(t *testing.T) {
 		"dep-revocation",
 		"dep-evidence-write",
 		"dep-evidence-audit",
+		"dep-consumer-verification",
 	}
 	for _, lane := range lanes {
 		environmentKey := strings.ToUpper(strings.ReplaceAll(lane, "-", "_"))
@@ -334,6 +335,9 @@ func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
 			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
 			"DEPENDENCY_AUTHORITY_REVOCATION_REASON=${{ inputs.reason }}",
 		},
+		"dep-consumer-verification": {
+			"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}", "DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
+		},
 	}
 	for lane, bindings := range lanes {
 		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
@@ -381,10 +385,60 @@ func TestScanningLanesBindTheScannerIdentityOverrides(t *testing.T) {
 			t.Fatalf("lane workflow %s carries a scanner binding outside the documented identity exception", lane)
 		}
 	}
-	for _, lane := range []string{"dep-intake-fetch", "dep-promotion", "dep-revocation", "dep-evidence-write", "dep-evidence-audit"} {
+	for _, lane := range []string{"dep-intake-fetch", "dep-promotion", "dep-revocation", "dep-evidence-write", "dep-evidence-audit", "dep-consumer-verification"} {
 		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
 		if strings.Contains(content, "DEPENDENCY_AUTHORITY_SCANNER") {
 			t.Fatalf("lane workflow %s carries a scanner binding; only the admission and revalidation lanes carry the scanner identity operation inputs", lane)
+		}
+	}
+}
+
+// TestConsumerVerificationCadenceDispatcherBindsTheScheduledForm pins the
+// cadence occasion of the consumer verification: the lane itself stays a
+// dispatch-only trigger, and the dispatcher fires it on the bound cadence
+// through the documented first-class dispatch form — the dispatcher never
+// federates, never touches the perimeter, and never carries a data-plane
+// reference.
+func TestConsumerVerificationCadenceDispatcherBindsTheScheduledForm(t *testing.T) {
+	content := readRepositoryFile(t, ".github/workflows/dep-consumer-verification-schedule.yml")
+	for _, required := range []string{
+		"schedule:",
+		"cron:",
+		"workflow_dispatch:",
+		"permissions:\n      actions: write",
+		"vars.DEP_CONSUMER_VERIFICATION_CADENCE_TARGETS",
+		"secrets.GITHUB_TOKEN",
+		"gh workflow run dep-consumer-verification.yml",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("the consumer verification cadence dispatcher does not contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"google-github-actions/auth",
+		"gcloud",
+		"WORKLOAD_JOB",
+		"DEPENDENCY_AUTHORITY_",
+		"t33n-software",
+		"pull_request",
+		"\n  push:",
+		"actions/checkout",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("the consumer verification cadence dispatcher contains %q; it dispatches the lane and never touches the perimeter", forbidden)
+		}
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.Contains(line, "uses:") {
+			continue
+		}
+		parts := strings.SplitN(line, "@", 2)
+		if len(parts) != 2 {
+			t.Fatalf("the cadence dispatcher carries an unpinned action reference %q", line)
+		}
+		reference := strings.Fields(strings.TrimSpace(parts[1]))[0]
+		if len(reference) != 40 || !isHex(reference) {
+			t.Fatalf("the cadence dispatcher action %q is not pinned to a full commit SHA", line)
 		}
 	}
 }
@@ -443,6 +497,7 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 		"dependency-promotion-controller",
 		"dependency-revalidation-controller",
 		"dependency-revocation-controller",
+		"dependency-consumer-verification-controller",
 	} {
 		for _, file := range []string{"main.go", "main_test.go"} {
 			path := repositoryPath("cmd", controller, file)
@@ -452,12 +507,12 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 		}
 	}
 
-	for _, domain := range []string{"admission", "approval", "candidate", "evidence", "quarantine", "revocation", "tooling"} {
+	for _, domain := range []string{"admission", "approval", "candidate", "evidence", "quarantine", "revocation", "tooling", "verification"} {
 		if _, err := os.Stat(repositoryPath("internal", "dependency", "domain", domain)); err != nil {
 			t.Fatalf("missing domain package %q: %v", domain, err)
 		}
 	}
-	for _, application := range []string{"admission", "intake", "promotion", "revalidation", "revocation"} {
+	for _, application := range []string{"admission", "consumerverification", "intake", "promotion", "revalidation", "revocation"} {
 		if _, err := os.Stat(repositoryPath("internal", "dependency", "application", application)); err != nil {
 			t.Fatalf("missing application package %q: %v", application, err)
 		}
@@ -468,6 +523,7 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 		repositoryPath("internal", "dependency", "adapters", "outbound", "policy"),
 		repositoryPath("internal", "dependency", "adapters", "outbound", "scanner"),
 		repositoryPath("internal", "dependency", "adapters", "outbound", "artifactregistry"),
+		repositoryPath("internal", "dependency", "adapters", "outbound", "consumercontract"),
 		repositoryPath("internal", "dependency", "adapters", "outbound", "evidence"),
 		repositoryPath("internal", "dependency", "adapters", "outbound", "tooling"),
 		repositoryPath("internal", "dependency", "bootstrap"),
@@ -528,8 +584,8 @@ func TestModuleIdentityAndQualityContract(t *testing.T) {
 		!slices.Equal(qualityConfig.Gates[0].Args, []string{"tool", "-modfile", "tools/go.mod", "quality-gate"}) {
 		t.Fatal("the gate does not invoke the canonical gate chain through the tooling module pin")
 	}
-	if len(qualityConfig.Project.Binaries) != 5 {
-		t.Fatalf("the project binaries must carry the five lane controllers, got %d", len(qualityConfig.Project.Binaries))
+	if len(qualityConfig.Project.Binaries) != 6 {
+		t.Fatalf("the project binaries must carry the six lane controllers, got %d", len(qualityConfig.Project.Binaries))
 	}
 	for _, binary := range qualityConfig.Project.Binaries {
 		if !strings.HasPrefix(binary.Package, "./cmd/dependency-") {
@@ -606,6 +662,8 @@ func TestControllerImageSubstrateBindsTheGovernedBuildForm(t *testing.T) {
 		"FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab",
 		"ARG CONTROLLER",
 		"COPY .build/controller-images/${CONTROLLER} /controller",
+		"ARG TOOLCHAIN=none",
+		"COPY .build/toolchain/${TOOLCHAIN} /toolchain/",
 		"USER 65532:65532",
 		`ENTRYPOINT ["/controller"]`,
 	} {
@@ -626,6 +684,7 @@ func TestControllerImageSubstrateBindsTheGovernedBuildForm(t *testing.T) {
 		"dependency-promotion-controller",
 		"dependency-revalidation-controller",
 		"dependency-revocation-controller",
+		"dependency-consumer-verification-controller",
 	} {
 		if !strings.Contains(runbook, controller) {
 			t.Fatalf("the controller image runbook does not bind %q", controller)

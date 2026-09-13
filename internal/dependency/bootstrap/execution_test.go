@@ -16,6 +16,7 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/policy"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/consumerverification"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/revalidation"
@@ -24,6 +25,7 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 	domaintooling "github.com/t33n-software/dependency-authority/internal/dependency/domain/tooling"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/verification"
 )
 
 func stubBundle(t *testing.T) {
@@ -109,6 +111,65 @@ func revocationLanePorts(t *testing.T) Ports {
 	t.Helper()
 	ports := fullPorts(t)
 	ports.Candidates = &fakeCandidates{stored: approvedCandidate(t), found: true}
+	return ports
+}
+
+// fakeContract records the consumer contract proof calls and injects
+// per-proof failures.
+type fakeContract struct {
+	prepareErr   error
+	downloadSum  string
+	downloadErr  error
+	probeErr     error
+	stableErr    error
+	verifyErr    error
+	buildVersion string
+	buildSum     string
+	buildErr     error
+	events       []string
+}
+
+func (f *fakeContract) Prepare(string, string) (string, error) {
+	f.events = append(f.events, "prepare")
+	return "workspace", f.prepareErr
+}
+
+func (f *fakeContract) Release(string) error {
+	f.events = append(f.events, "release")
+	return nil
+}
+
+func (f *fakeContract) Download(context.Context, string, string, string) (string, error) {
+	f.events = append(f.events, "download")
+	return f.downloadSum, f.downloadErr
+}
+
+func (f *fakeContract) ProbeFailsClosed(context.Context, string, string) error {
+	f.events = append(f.events, "probe")
+	return f.probeErr
+}
+
+func (f *fakeContract) GraphStable(context.Context, string) error {
+	f.events = append(f.events, "stable")
+	return f.stableErr
+}
+
+func (f *fakeContract) VerifyIntegrity(context.Context, string) error {
+	f.events = append(f.events, "verify")
+	return f.verifyErr
+}
+
+func (f *fakeContract) BuildEvidence(context.Context, string, string) (string, string, error) {
+	f.events = append(f.events, "build")
+	return f.buildVersion, f.buildSum, f.buildErr
+}
+
+func consumerVerificationLanePorts(t *testing.T) Ports {
+	t.Helper()
+	ports := fullPorts(t)
+	ports.Candidates = &fakeCandidates{stored: approvedCandidate(t), found: true}
+	ports.EvidenceStore = fakeEvidenceStore{trail: []evidence.Reference{testReference(t, evidence.TypeApproval, "approvals/1", laneTime, nil)}}
+	ports.Contract = &fakeContract{downloadSum: "h1:abc=", buildVersion: "v0.7.0", buildSum: "h1:abc="}
 	return ports
 }
 
@@ -900,6 +961,163 @@ func TestExecuteRevocationFailsClosedOnTheDownloadBlock(t *testing.T) {
 	}
 }
 
+func TestExecuteConsumerVerificationRecordsThePassEvidence(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	journal := journalOfPorts(t, ports)
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err != nil {
+		t.Fatalf("executeConsumerVerification() error = %v", err)
+	}
+	if len(journal.puts) != 1 || len(journal.records) != 1 {
+		t.Fatalf("journal calls = %d puts, %d records, want 1/1", len(journal.puts), len(journal.records))
+	}
+	if journal.puts[0].Type() != evidence.TypeVerification {
+		t.Fatalf("evidence type = %q, want %q", journal.puts[0].Type(), evidence.TypeVerification)
+	}
+	if journal.puts[0].Issuer() != "dep-admission-controller@example.iam.gserviceaccount.com" {
+		t.Fatalf("evidence issuer = %q, want the lane identity", journal.puts[0].Issuer())
+	}
+	var document struct {
+		Schema  string `json:"schema"`
+		Outcome string `json:"outcome"`
+		Proofs  []struct {
+			Proof string `json:"proof"`
+		} `json:"proofs"`
+	}
+	if err := json.Unmarshal(journal.payloads[0], &document); err != nil {
+		t.Fatalf("the verification evidence payload is not decodable: %v", err)
+	}
+	if document.Schema != "dependency-authority/consumer-verification/v1" || document.Outcome != "pass" || len(document.Proofs) != 5 {
+		t.Fatalf("verification evidence = %q outcome %q with %d proofs, want the pass record with five proofs", document.Schema, document.Outcome, len(document.Proofs))
+	}
+	if document.Proofs[0].Proof != string(verification.ProofPositiveResolution) || document.Proofs[4].Proof != string(verification.ProofBuildEvidenceCorrespondence) {
+		t.Fatalf("proof order = %q … %q, want the canonical order", document.Proofs[0].Proof, document.Proofs[4].Proof)
+	}
+	if !strings.Contains(stdout.String(), "verified proofs=5") {
+		t.Fatalf("stdout = %q, want the verification result line", stdout.String())
+	}
+}
+
+func TestExecuteConsumerVerificationFailsClosedWithoutTheJournal(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	ports.Journal = nil
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err == nil || !strings.Contains(err.Error(), "evidence journal is not bound") {
+		t.Fatalf("executeConsumerVerification() error = %v, want the journal guard", err)
+	}
+}
+
+func TestExecuteConsumerVerificationFailsClosedOnTheCandidateLoad(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	ports.Candidates = &fakeCandidates{findErr: errors.New("records unavailable")}
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err == nil || !strings.Contains(err.Error(), "load candidate") {
+		t.Fatalf("executeConsumerVerification() error = %v, want the candidate load failure", err)
+	}
+}
+
+func TestExecuteConsumerVerificationFailsClosedOnAnUnknownCandidate(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	ports.Candidates = &fakeCandidates{found: false}
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("executeConsumerVerification() error = %v, want the unknown-candidate failure", err)
+	}
+}
+
+func TestExecuteConsumerVerificationRecordsTheProofFailure(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	contract := ports.Contract.(*fakeContract)
+	contract.stableErr = errors.New("graph mutation")
+	journal := journalOfPorts(t, ports)
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err == nil {
+		t.Fatal("executeConsumerVerification() error = nil, want the proof failure")
+	}
+	var proofError *verification.ProofError
+	if !errors.As(err, &proofError) || proofError.Proof() != verification.ProofGraphStability {
+		t.Fatalf("executeConsumerVerification() error = %v, want the graph-stability proof error", err)
+	}
+	if len(journal.puts) != 1 {
+		t.Fatalf("journal puts = %d, want the failure evidence", len(journal.puts))
+	}
+	var document struct {
+		Outcome     string `json:"outcome"`
+		FailedProof string `json:"failed_proof"`
+		Detail      string `json:"detail"`
+	}
+	if err := json.Unmarshal(journal.payloads[0], &document); err != nil {
+		t.Fatalf("the failure evidence payload is not decodable: %v", err)
+	}
+	if document.Outcome != "fail" || document.FailedProof != string(verification.ProofGraphStability) || document.Detail == "" {
+		t.Fatalf("failure evidence = outcome %q failed proof %q detail %q, want the failed proof record", document.Outcome, document.FailedProof, document.Detail)
+	}
+}
+
+func TestExecuteConsumerVerificationFailsClosedOnTheFailureEvidence(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	contract := ports.Contract.(*fakeContract)
+	contract.probeErr = errors.New("the probe resolved")
+	journal := journalOfPorts(t, ports)
+	journal.putErr = errors.New("payload store unavailable")
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err == nil || !strings.Contains(err.Error(), "publish verification evidence") {
+		t.Fatalf("executeConsumerVerification() error = %v, want the failure-evidence publish failure", err)
+	}
+}
+
+func TestExecuteConsumerVerificationFailsClosedOnThePassEvidence(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	journal := journalOfPorts(t, ports)
+	journal.recordErr = errors.New("index unavailable")
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err == nil || !strings.Contains(err.Error(), "index verification evidence") {
+		t.Fatalf("executeConsumerVerification() error = %v, want the pass-evidence index failure", err)
+	}
+}
+
+func TestExecuteConsumerVerificationWritesNoEvidenceOnAPreconditionFailure(t *testing.T) {
+	ports := consumerVerificationLanePorts(t)
+	contract := ports.Contract.(*fakeContract)
+	contract.prepareErr = errors.New("read-only root")
+	journal := journalOfPorts(t, ports)
+	service := laneService(t, OperationConsumerVerification, ports).(consumerverification.Service)
+
+	var stdout bytes.Buffer
+	err := executeConsumerVerification(context.Background(), service, ports, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe), &stdout)
+	if err == nil {
+		t.Fatal("executeConsumerVerification() error = nil, want the precondition failure")
+	}
+	var proofError *verification.ProofError
+	if errors.As(err, &proofError) {
+		t.Fatalf("executeConsumerVerification() error = %v, want a precondition failure, not a proof error", err)
+	}
+	if len(journal.puts) != 0 {
+		t.Fatalf("journal puts = %d, want no evidence on a precondition failure", len(journal.puts))
+	}
+}
+
 func TestJournalOfBindsTheJournal(t *testing.T) {
 	if _, err := journalOf(Ports{}); err == nil {
 		t.Fatal("journalOf(empty) error = nil, want the journal guard")
@@ -1120,7 +1338,7 @@ func TestProvenScannerDatabaseIdentity(t *testing.T) {
 }
 
 func TestOperationFields(t *testing.T) {
-	for _, operation := range []Operation{OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation} {
+	for _, operation := range []Operation{OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification} {
 		if len(operationFields(operation)) == 0 {
 			t.Errorf("operationFields(%q) = empty, want the required inputs", operation)
 		}
@@ -1152,6 +1370,7 @@ func TestExecuteRoutesEveryLane(t *testing.T) {
 		{OperationPromotion, promotionLanePorts, []config.Field{config.FieldModule, config.FieldVersion}, "state=approved"},
 		{OperationRevalidation, revalidationLanePorts, []config.Field{config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity}, "decision=admit"},
 		{OperationRevocation, revocationLanePorts, []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldRevocationReason}, "state=revoked"},
+		{OperationConsumerVerification, consumerVerificationLanePorts, []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe}, "verified proofs=5"},
 	}
 	for _, lane := range lanes {
 		t.Run(string(lane.operation), func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/artifactregistry"
+	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/consumercontract"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/evidence"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/policy"
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/scanner"
@@ -57,6 +58,17 @@ func PortsFromEnv(lookup func(string) string) (Ports, error) {
 		// total.
 		adapter, _ := scanner.NewOSV(bindings.ScannerTool(), bindings.ScannerDatabase(), bindings.ScanContentRoot(), scanner.ExecRunner)
 		ports.Scanner = adapter
+	}
+
+	if bindings.GoTool() != "" && bindings.ConsumerWorkRoot() != "" && bindings.ApprovedEndpoint() != "" {
+		// The controller executable resolves at process start; an empty path
+		// fails closed in the adapter constructor.
+		executable, _ := os.Executable()
+		contract, err := consumercontract.NewGo(bindings.GoTool(), bindings.ConsumerWorkRoot(), bindings.ApprovedEndpoint(), executable, consumercontract.ExecRunner)
+		if err != nil {
+			return Ports{}, fmt.Errorf("bind consumer contract adapter: %w", err)
+		}
+		ports.Contract = contract
 	}
 
 	if bindings.ArtifactAPI() != "" {

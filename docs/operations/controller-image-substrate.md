@@ -10,12 +10,21 @@ release class.
 ## Bound form
 
 - Exactly one versioned `Dockerfile` at the repository root, parameterized by
-  `ARG CONTROLLER` over the five lane controllers:
+  `ARG CONTROLLER` over the six lane controllers:
   - `dependency-intake-controller`
   - `dependency-admission-controller`
   - `dependency-promotion-controller`
   - `dependency-revalidation-controller`
   - `dependency-revocation-controller`
+  - `dependency-consumer-verification-controller`
+- The consumer verification controller image is the toolchain-bearing
+  variant: it additionally carries the pinned Go distribution tree under
+  `/toolchain/` (bound as `DEPENDENCY_AUTHORITY_GO_TOOL=/toolchain/bin/go`),
+  staged at build time from the publisher's release channel and proven
+  against the publisher's checksums — never a floating download. The variant
+  is packaged through the same parameterized `Dockerfile` with
+  `--build-arg TOOLCHAIN=go`; every other controller builds with the default
+  `TOOLCHAIN=none`, which copies the empty `.build/toolchain/none/` tree.
 - The base is the minimal non-root runtime
   `gcr.io/distroless/static-debian12:nonroot`, pinned by the full index digest
   `sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab`
@@ -52,6 +61,22 @@ go build -trimpath -ldflags="-s -w" \
   -o .build/controller-images/<controller> ./cmd/<controller>
 ```
 
+For the toolchain-bearing variant (the consumer verification controller),
+additionally stage the pinned Go distribution tree and prove it fail-closed
+against the publisher's checksums before packaging — the pinned distribution
+version and its publisher checksum digest are bound by the organization
+instance, never guessed:
+
+```text
+# fetch the pinned Go distribution archive from the publisher's release
+# channel, prove its SHA-256 against the bound publisher checksum, and unpack
+# it to .build/toolchain/go/ so the image carries exactly the proven tree
+```
+
+For every other controller the build procedure creates the empty
+`.build/toolchain/none/` tree, so the parameterized `COPY` succeeds without
+carrying a toolchain.
+
 The toolchain is exactly the pinned one (the `toolchain` directive of
 `go.mod`); a host whose local installation diverges resolves the pinned
 toolchain through the Go toolchain mechanism, and a binary built with a
@@ -62,9 +87,13 @@ under `.build/controller-images/` enters the image):
 
 ```text
 docker build --build-arg CONTROLLER=<controller> \
+  --build-arg TOOLCHAIN=none \
   --platform linux/amd64 \
   -t <region>-docker.pkg.dev/<organization>-dep-control/staging-controller-images/<controller>:<build-id> .
 ```
+
+The toolchain-bearing variant builds with `--build-arg TOOLCHAIN=go` after
+the pinned distribution tree was staged and proven.
 
 Smoke-proof the image before any delivery:
 
@@ -86,7 +115,7 @@ docker run --rm <image> --version
 ## Verification
 
 The packaging contract tests bind the substrate fail-closed: the
-digest-pinned base, the `ARG CONTROLLER` parametrization, the non-root user,
-the absent syntax frontend reference, the five controller names, and the
-bindings of this runbook. The governed quality gate runs them on every
-shared-line change.
+digest-pinned base, the `ARG CONTROLLER` parametrization, the `ARG TOOLCHAIN`
+variant form, the non-root user, the absent syntax frontend reference, the
+six controller names, and the bindings of this runbook. The governed quality
+gate runs them on every shared-line change.

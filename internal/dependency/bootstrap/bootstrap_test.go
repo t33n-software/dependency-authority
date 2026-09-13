@@ -219,6 +219,7 @@ func fullPorts(t *testing.T) Ports {
 		Recorder:      journal,
 		Journal:       journal,
 		Content:       &fakeCandidateContent{},
+		Contract:      &fakeContract{},
 		Now:           func() time.Time { return laneTime },
 	}
 }
@@ -308,6 +309,7 @@ func operationInputs() map[string]string {
 		config.EnvScannerDatabaseIdentity: "osv-db sha256:aaa",
 		config.EnvApprovalTTL:             "72h",
 		config.EnvRevocationReason:        "confirmed supply chain incident",
+		config.EnvNegativeProbe:           "example.invalid/never-admitted@v0.0.0",
 		config.EnvPolicyBundle:            ".build/policy/go.json",
 	}
 }
@@ -433,6 +435,7 @@ func TestLaneWrappers(t *testing.T) {
 		{"promotion", RunPromotion, "control", promotionLanePorts, "state=approved"},
 		{"revalidation", RunRevalidation, "control", revalidationLanePorts, "dependency-revalidation-controller: candidate"},
 		{"revocation", RunRevocation, "control", revocationLanePorts, "state=revoked download_block=true"},
+		{"consumer-verification", RunConsumerVerification, "control", consumerVerificationLanePorts, "verified proofs=5"},
 	}
 	for _, lane := range lanes {
 		t.Run(lane.name, func(t *testing.T) {
@@ -449,7 +452,7 @@ func TestLaneWrappers(t *testing.T) {
 }
 
 func TestCheckZone(t *testing.T) {
-	for _, operation := range []Operation{OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation} {
+	for _, operation := range []Operation{OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification} {
 		if err := checkZone(operation, config.ZoneControl); err != nil {
 			t.Errorf("checkZone(%q, control) error = %v", operation, err)
 		}
@@ -473,7 +476,7 @@ func TestZoneForRejectsUnknownOperation(t *testing.T) {
 
 func TestBindFailsClosedOnUnboundPorts(t *testing.T) {
 	for _, operation := range []Operation{
-		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation,
+		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification,
 	} {
 		if _, err := bind(operation, Ports{}); err == nil {
 			t.Errorf("bind(%q, empty ports) error = nil, want unbound port error", operation)
@@ -483,7 +486,7 @@ func TestBindFailsClosedOnUnboundPorts(t *testing.T) {
 
 func TestBindSucceedsWithFullPorts(t *testing.T) {
 	for _, operation := range []Operation{
-		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation,
+		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification,
 	} {
 		if _, err := bind(operation, fullPorts(t)); err != nil {
 			t.Errorf("bind(%q, full ports) error = %v", operation, err)

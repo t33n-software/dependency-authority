@@ -25,13 +25,16 @@ const (
 	TypePolicy      Type = "policy"
 	TypeQuality     Type = "quality"
 	TypeRevocation  Type = "revocation"
+	// TypeVerification marks the consumer verification record of a candidate.
+	TypeVerification Type = "verification"
 )
 
 // Valid reports whether the evidence type belongs to the canonical set.
 func (t Type) Valid() bool {
 	switch t {
 	case TypeSBOM, TypeSignature, TypeProvenance, TypeAttestation, TypeTest,
-		TypeScan, TypeApproval, TypeException, TypePolicy, TypeQuality, TypeRevocation:
+		TypeScan, TypeApproval, TypeException, TypePolicy, TypeQuality, TypeRevocation,
+		TypeVerification:
 		return true
 	default:
 		return false

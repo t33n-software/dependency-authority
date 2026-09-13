@@ -23,6 +23,8 @@ func fullLaneEnv() map[string]string {
 		config.EnvScannerTool:        "tools/osv-scanner",
 		config.EnvScannerDatabase:    "tools/osv-db",
 		config.EnvScanContentRoot:    "work/content",
+		config.EnvGoTool:             "toolchain/bin/go",
+		config.EnvConsumerWorkRoot:   "work/consumer",
 	}
 }
 
@@ -45,7 +47,7 @@ func TestPortsFromEnvEmptyEnvironmentBindsNoAdapter(t *testing.T) {
 	if ports.Now == nil {
 		t.Fatal("PortsFromEnv() Now = nil, want the lane clock")
 	}
-	if ports.Upstream != nil || ports.Scanner != nil || ports.Policies != nil || ports.Candidates != nil || ports.EvidenceStore != nil || ports.Registry != nil || ports.Gate != nil || ports.Recorder != nil {
+	if ports.Upstream != nil || ports.Scanner != nil || ports.Policies != nil || ports.Candidates != nil || ports.EvidenceStore != nil || ports.Registry != nil || ports.Gate != nil || ports.Recorder != nil || ports.Contract != nil {
 		t.Fatalf("PortsFromEnv() = %+v, want every adapter unbound", ports)
 	}
 }
@@ -165,6 +167,7 @@ func TestPortsFromEnvBindsTheFullLaneEnvironment(t *testing.T) {
 		"gate":           ports.Gate,
 		"recorder":       ports.Recorder,
 		"content":        ports.Content,
+		"contract":       ports.Contract,
 	} {
 		if port == nil {
 			t.Errorf("PortsFromEnv() left %s unbound on the full contract", name)
@@ -214,6 +217,30 @@ func TestPortsFromEnvBindsTheCandidateContent(t *testing.T) {
 	})
 }
 
+func TestPortsFromEnvBindsTheConsumerContract(t *testing.T) {
+	partial, err := PortsFromEnv(envBinding(map[string]string{
+		config.EnvGoTool: "toolchain/bin/go",
+	}))
+	if err != nil {
+		t.Fatalf("PortsFromEnv() error = %v", err)
+	}
+	if partial.Contract != nil {
+		t.Fatal("PortsFromEnv() bound the consumer contract on a partial contract")
+	}
+
+	full, err := PortsFromEnv(envBinding(map[string]string{
+		config.EnvGoTool:           "toolchain/bin/go",
+		config.EnvConsumerWorkRoot: "work/consumer",
+		config.EnvApprovedEndpoint: "https://europe-west3-go.pkg.dev/p/r",
+	}))
+	if err != nil {
+		t.Fatalf("PortsFromEnv() error = %v", err)
+	}
+	if full.Contract == nil {
+		t.Fatal("PortsFromEnv() left the consumer contract unbound on the complete contract")
+	}
+}
+
 func TestPortsFromEnvPropagatesAdapterValidation(t *testing.T) {
 	for name, values := range map[string]map[string]string{
 		"invalid artifact api": {
@@ -232,6 +259,11 @@ func TestPortsFromEnvPropagatesAdapterValidation(t *testing.T) {
 			config.EnvApprovedRepository: "projects/p/locations/l/repositories/approved",
 			config.EnvUpstreamEndpoint:   "https://europe-west3-go.pkg.dev/p/r",
 			config.EnvApprovedEndpoint:   "http://plaintext.example.com",
+		},
+		"invalid consumer contract endpoint": {
+			config.EnvGoTool:           "toolchain/bin/go",
+			config.EnvConsumerWorkRoot: "work/consumer",
+			config.EnvApprovedEndpoint: "http://plaintext.example.com",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
