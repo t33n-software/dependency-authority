@@ -16,6 +16,7 @@ func TestTypeValidity(t *testing.T) {
 	for _, evidenceType := range []Type{
 		TypeSBOM, TypeSignature, TypeProvenance, TypeAttestation, TypeTest,
 		TypeScan, TypeApproval, TypeException, TypePolicy, TypeQuality, TypeRevocation,
+		TypeVerification,
 	} {
 		if !evidenceType.Valid() {
 			t.Errorf("Type(%q).Valid() = false, want true", evidenceType)

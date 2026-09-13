@@ -26,6 +26,9 @@ const (
 	// EnvRevocationReason names the revocation reason the revocation lane
 	// binds into the revocation evidence.
 	EnvRevocationReason = "DEPENDENCY_AUTHORITY_REVOCATION_REASON"
+	// EnvNegativeProbe names the never-admitted reference the consumer
+	// verification lane proves fail-closed at the approved endpoint.
+	EnvNegativeProbe = "DEPENDENCY_AUTHORITY_NEGATIVE_PROBE"
 )
 
 // Field identifies one lane operation input binding.
@@ -47,6 +50,9 @@ const (
 	FieldApprovalTTL
 	// FieldRevocationReason is the revocation reason input.
 	FieldRevocationReason
+	// FieldNegativeProbe is the never-admitted reference input of the consumer
+	// verification lane.
+	FieldNegativeProbe
 )
 
 // env names the environment variable carrying the field.
@@ -66,6 +72,8 @@ func (f Field) env() string {
 		return EnvApprovalTTL
 	case FieldRevocationReason:
 		return EnvRevocationReason
+	case FieldNegativeProbe:
+		return EnvNegativeProbe
 	default:
 		return ""
 	}
@@ -80,6 +88,7 @@ type Operation struct {
 	scannerDatabaseIdentity string
 	approvalTTL             time.Duration
 	revocationReason        string
+	negativeProbe           string
 }
 
 // OperationFromEnv loads the operation inputs from the process environment
@@ -95,6 +104,7 @@ func OperationFromEnv(lookup func(string) string, required ...Field) (Operation,
 		scannerIdentity:         strings.TrimSpace(lookup(EnvScannerIdentity)),
 		scannerDatabaseIdentity: strings.TrimSpace(lookup(EnvScannerDatabaseIdentity)),
 		revocationReason:        strings.TrimSpace(lookup(EnvRevocationReason)),
+		negativeProbe:           strings.TrimSpace(lookup(EnvNegativeProbe)),
 	}
 	if raw := strings.TrimSpace(lookup(EnvApprovalTTL)); raw != "" {
 		ttl, err := time.ParseDuration(raw)
@@ -144,6 +154,8 @@ func (o Operation) value(field Field) string {
 		return o.scannerDatabaseIdentity
 	case FieldRevocationReason:
 		return o.revocationReason
+	case FieldNegativeProbe:
+		return o.negativeProbe
 	default:
 		return ""
 	}
@@ -182,4 +194,10 @@ func (o Operation) ApprovalTTL() time.Duration {
 // RevocationReason returns the revocation reason.
 func (o Operation) RevocationReason() string {
 	return o.revocationReason
+}
+
+// NegativeProbe returns the never-admitted reference the consumer
+// verification lane proves fail-closed.
+func (o Operation) NegativeProbe() string {
+	return o.negativeProbe
 }

@@ -1,0 +1,48 @@
+name: dep-consumer-verification cadence
+
+# The cadence occasion of the consumer verification (the execution-occasion
+# convention of the cloud-agnostic dependency-authority reference): the lane
+# itself stays a dispatch-only trigger, so this dispatcher fires it on the
+# bound cadence. The cron value mirrors the organization-instance binding
+# (planned until the provisioning read-back proof); a value change is a
+# governed pull request.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dep-consumer-verification-schedule-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch the consumer verification lane
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Dispatch the lane for every bound cadence target
+        env:
+          TARGETS: ${{ vars.DEP_CONSUMER_VERIFICATION_CADENCE_TARGETS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TARGETS"
+          echo "$TARGETS" | jq -c '.[]' | while read -r target; do
+            MODULE="$(jq -r '.module' <<< "$target")"
+            VERSION="$(jq -r '.version' <<< "$target")"
+            test -n "$MODULE"
+            test -n "$VERSION"
+            gh workflow run dep-consumer-verification.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref develop \
+              -f module="$MODULE" \
+              -f version="$VERSION"
+            echo "dispatched dep-consumer-verification for $MODULE $VERSION"
+          done

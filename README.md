@@ -2,9 +2,10 @@
 
 `dependency-authority` is the organization-agnostic core for the dependency
 authority bounded context: the intake, admission, promotion, revalidation,
-and revocation lanes that govern how package dependencies enter an
-organization, are evaluated, promoted into the approved zone, revalidated,
-and revoked.
+revocation, and consumer verification lanes that govern how package
+dependencies enter an organization, are evaluated, promoted into the approved
+zone, revalidated, revoked, and proven consumable against the live approved
+endpoint.
 
 This repository never contains concrete organization, tenant, project,
 identity, network, secret, or registry bindings. Organization instances and
@@ -18,10 +19,11 @@ The core owns:
 - the candidate lifecycle domain model (`pending`, `quarantined`,
   `approved`, `revoked`);
 - the admission policy model and its evaluation;
-- the intake, admission, promotion, revalidation, and revocation use cases;
+- the intake, admission, promotion, revalidation, revocation, and consumer
+  verification use cases;
 - the consumer-defined outbound ports for upstream, scanner, policy,
-  evidence, registry, and download-gate adapters;
-- the five lane controllers under `cmd/`.
+  evidence, registry, download-gate, and consumer-contract adapters;
+- the six lane controllers under `cmd/`.
 
 The core never contains:
 
@@ -42,6 +44,7 @@ dependency-admission-controller     runs in the control zone
 dependency-promotion-controller     runs in the control zone
 dependency-revalidation-controller  runs in the control zone
 dependency-revocation-controller    runs in the control zone
+dependency-consumer-verification-controller  runs in the control zone
 ```
 
 Each controller binds `DEPENDENCY_AUTHORITY_ZONE` and
@@ -89,6 +92,14 @@ implement the consumer-defined ports:
   (`admission.EvidenceStore`, `revocation.EvidenceRecorder`) — its trail
   reads download in the media form (`?alt=media`), so the decoded content
   is the record bytes, never the JSON envelope;
+- `consumercontract`: the consumer verification contract execution
+  (`consumerverification.Contract`) — the ecosystem's real pinned Go
+  toolchain runs the five consumer-contract proofs against the live approved
+  endpoint with the controlled environment (the approved endpoint as the only
+  proxy, the workload's own GOAUTH command form rendered by the controller's
+  `goauth` mode from the instance metadata token source in process memory
+  only, no checksum-database or VCS fallback, and every writable surface
+  inside the declared scratch home), never a reimplemented contract;
 - `tooling`: the read-only workload tooling channel consumer — at startup the
   scanning lanes materialize the pinned scanner tool, the scanner database
   snapshot, and the admission policy bundle from the evidence-zone generic
@@ -115,6 +126,8 @@ The adapters bind through the validated lane environment:
 | `DEPENDENCY_AUTHORITY_SCANNER_TOOL` | pinned scanner tool path |
 | `DEPENDENCY_AUTHORITY_SCANNER_DATABASE` | scanner database snapshot directory |
 | `DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT` | candidate materialization root |
+| `DEPENDENCY_AUTHORITY_GO_TOOL` | pinned Go toolchain binary of the consumer verification image |
+| `DEPENDENCY_AUTHORITY_CONSUMER_WORK_ROOT` | declared scratch home of the consumer verification workload |
 
 An adapter binds only when its complete environment contract is present; a
 lane requiring an unbound adapter fails closed at bind time.
@@ -149,10 +162,17 @@ control plane.
 
 ## Lane workflows
 
-Seven dispatch-only workflows under `.github/workflows/` run the lanes under
-the seven protected `dep-*` environments (ADR-0002): `dep-intake-fetch`,
+Eight dispatch-only workflows under `.github/workflows/` run the lanes under
+the eight protected `dep-*` environments (ADR-0002): `dep-intake-fetch`,
 `dep-admission`, `dep-promotion`, `dep-revalidation`, `dep-revocation`,
-`dep-evidence-write`, and `dep-evidence-audit`. Each controller lane takes
+`dep-evidence-write`, `dep-evidence-audit`, and `dep-consumer-verification`.
+The consumer verification lane proves the consumer contract against the live
+approved endpoint through the real pinned Go toolchain its image carries (the
+five canonical proofs, recorded as the lane's own dependency evidence); it is
+fired by governed dispatches after changes with consumer-contract effect and
+by the cadence dispatcher workflow `dep-consumer-verification-schedule.yml`,
+which triggers the lane on the instance-bound cadence while the lane itself
+stays dispatch-only. Each controller lane takes
 the candidate identity as required dispatch inputs (`module`, `version`; the
 revocation lane additionally takes `reason`), federates its
 environment-scoped trigger identity, and invokes the zone-resident workload
@@ -193,7 +213,7 @@ and metadata, the pinned build tool module, lint (staticcheck), unit tests,
 exact 100% statement coverage, race detector, static analysis, fail-closed
 vulnerability analysis (govulncheck), the registered fuzz smoke lanes for the
 inbound configuration, adapter bindings, and operation inputs boundaries,
-Lefthook configuration validation, and native binary builds of all five lane
+Lefthook configuration validation, and native binary builds of all six lane
 controllers with smoke tests.
 
 The Go toolchain is pinned exactly (`toolchain go1.26.6`,
@@ -212,15 +232,15 @@ every shared-line change.
 
 ## Repository layout
 
-- `cmd/` contains the five lane controllers; the canonical gate chain is
+- `cmd/` contains the six lane controllers; the canonical gate chain is
   referenced through the `tools/` module pin.
 - `Dockerfile` is the single parameterized controller workload image form
   (GO-SCF-019): the pure packaging of a locally built controller binary on
   the digest-pinned minimal non-root runtime; the build and delivery
   procedure lives in `docs/operations/controller-image-substrate.md`.
 - `internal/dependency/domain/` contains the lifecycle, admission, approval,
-  quarantine, revocation, and evidence domain models.
-- `internal/dependency/application/` contains the five lane use cases.
+  quarantine, revocation, tooling, verification, and evidence domain models.
+- `internal/dependency/application/` contains the six lane use cases.
 - `internal/dependency/adapters/inbound/` contains the environment
   configuration adapter; `internal/dependency/adapters/outbound/` contains
   the trust-zone adapter implementations (ADR-0002).

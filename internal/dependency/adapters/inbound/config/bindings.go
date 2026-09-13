@@ -28,6 +28,12 @@ const (
 	EnvScannerDatabase = "DEPENDENCY_AUTHORITY_SCANNER_DATABASE"
 	// EnvScanContentRoot names the candidate materialization root.
 	EnvScanContentRoot = "DEPENDENCY_AUTHORITY_SCAN_CONTENT_ROOT"
+	// EnvGoTool names the pinned Go toolchain binary the consumer
+	// verification image carries beside the controller.
+	EnvGoTool = "DEPENDENCY_AUTHORITY_GO_TOOL"
+	// EnvConsumerWorkRoot names the declared scratch home of the consumer
+	// verification workload: every writable toolchain surface lands inside it.
+	EnvConsumerWorkRoot = "DEPENDENCY_AUTHORITY_CONSUMER_WORK_ROOT"
 )
 
 // Bindings carries the outbound adapter bindings of the lane environment.
@@ -45,6 +51,8 @@ type Bindings struct {
 	scannerTool          string
 	scannerDatabase      string
 	scanContentRoot      string
+	goTool               string
+	consumerWorkRoot     string
 }
 
 // BindingsFromEnv loads the adapter bindings from the process environment.
@@ -63,6 +71,8 @@ func BindingsFromEnv(lookup func(string) string) (Bindings, error) {
 		scannerTool:          strings.TrimSpace(lookup(EnvScannerTool)),
 		scannerDatabase:      strings.TrimSpace(lookup(EnvScannerDatabase)),
 		scanContentRoot:      strings.TrimSpace(lookup(EnvScanContentRoot)),
+		goTool:               strings.TrimSpace(lookup(EnvGoTool)),
+		consumerWorkRoot:     strings.TrimSpace(lookup(EnvConsumerWorkRoot)),
 	}, nil
 }
 
@@ -114,4 +124,16 @@ func (b Bindings) ScannerDatabase() string {
 // ScanContentRoot returns the candidate materialization root.
 func (b Bindings) ScanContentRoot() string {
 	return b.scanContentRoot
+}
+
+// GoTool returns the pinned Go toolchain binary of the consumer verification
+// image.
+func (b Bindings) GoTool() string {
+	return b.goTool
+}
+
+// ConsumerWorkRoot returns the declared scratch home of the consumer
+// verification workload.
+func (b Bindings) ConsumerWorkRoot() string {
+	return b.consumerWorkRoot
 }

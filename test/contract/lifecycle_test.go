@@ -11,6 +11,7 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/candidate"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/evidence"
 	"github.com/t33n-software/dependency-authority/internal/dependency/domain/revocation"
+	"github.com/t33n-software/dependency-authority/internal/dependency/domain/verification"
 )
 
 const digest = "sha256:3b8f49c12b24cbbd6a4a0e6e2b2a4a4e8f0e1d2c3b4a59687766554433221100"
@@ -127,5 +128,35 @@ func TestApprovalAndRevocationThroughPublicAPI(t *testing.T) {
 	}
 	if _, err := revocation.New("no block", referenceOf(t, evidence.TypeRevocation, "revocations/2"), false, issuedAt); err == nil {
 		t.Fatal("revocation.New() error = nil without download block, want error")
+	}
+}
+
+// TestVerificationReportThroughPublicAPI exercises the consumer verification
+// report through the exported API only: the report accepts exactly the five
+// canonical proofs in order, and the proof error names the failed proof.
+func TestVerificationReportThroughPublicAPI(t *testing.T) {
+	results := make([]verification.Result, 0, len(verification.Proofs()))
+	for _, proof := range verification.Proofs() {
+		result, err := verification.NewResult(proof, "proven")
+		if err != nil {
+			t.Fatalf("NewResult(%q) error = %v", proof, err)
+		}
+		results = append(results, result)
+	}
+	report, err := verification.NewReport(results)
+	if err != nil {
+		t.Fatalf("NewReport() error = %v", err)
+	}
+	if len(report.Results()) != 5 {
+		t.Fatalf("Results() = %d entries, want the five canonical proofs", len(report.Results()))
+	}
+
+	if _, err := verification.NewReport(results[:3]); err == nil {
+		t.Fatal("NewReport( incomplete ) error = nil, want the completeness error")
+	}
+
+	proofError := verification.NewProofError(verification.ProofNegativeResolution, "example.invalid/never-admitted@v0.0.0", nil)
+	if proofError.Proof() != verification.ProofNegativeResolution {
+		t.Fatalf("Proof() = %q, want %q", proofError.Proof(), verification.ProofNegativeResolution)
 	}
 }

@@ -28,6 +28,8 @@ func TestBindingsFromEnvBindsEveryValue(t *testing.T) {
 		EnvScannerTool:          "tools/osv-scanner",
 		EnvScannerDatabase:      "tools/osv-db",
 		EnvScanContentRoot:      "work/content",
+		EnvGoTool:               "toolchain/bin/go",
+		EnvConsumerWorkRoot:     "work/consumer",
 	}))
 	if err != nil {
 		t.Fatalf("BindingsFromEnv() error = %v", err)
@@ -47,6 +49,8 @@ func TestBindingsFromEnvBindsEveryValue(t *testing.T) {
 		"scanner tool":           {bindings.ScannerTool(), "tools/osv-scanner"},
 		"scanner database":       {bindings.ScannerDatabase(), "tools/osv-db"},
 		"scan content root":      {bindings.ScanContentRoot(), "work/content"},
+		"go tool":                {bindings.GoTool(), "toolchain/bin/go"},
+		"consumer work root":     {bindings.ConsumerWorkRoot(), "work/consumer"},
 	} {
 		if got.got != got.want {
 			t.Errorf("%s = %q, want %q", name, got.got, got.want)
@@ -70,6 +74,8 @@ func TestBindingsFromEnvEmptyEnvironment(t *testing.T) {
 		"scanner tool":           bindings.ScannerTool(),
 		"scanner database":       bindings.ScannerDatabase(),
 		"scan content root":      bindings.ScanContentRoot(),
+		"go tool":                bindings.GoTool(),
+		"consumer work root":     bindings.ConsumerWorkRoot(),
 	} {
 		if got != "" {
 			t.Errorf("%s = %q, want empty", name, got)

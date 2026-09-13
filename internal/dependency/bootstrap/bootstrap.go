@@ -15,6 +15,7 @@ import (
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/consumerverification"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/revalidation"
@@ -25,11 +26,12 @@ import (
 type Operation string
 
 const (
-	OperationIntake       Operation = "intake"
-	OperationAdmission    Operation = "admission"
-	OperationPromotion    Operation = "promotion"
-	OperationRevalidation Operation = "revalidation"
-	OperationRevocation   Operation = "revocation"
+	OperationIntake               Operation = "intake"
+	OperationAdmission            Operation = "admission"
+	OperationPromotion            Operation = "promotion"
+	OperationRevalidation         Operation = "revalidation"
+	OperationRevocation           Operation = "revocation"
+	OperationConsumerVerification Operation = "consumer-verification"
 )
 
 // Ports carries every outbound port a lane controller may bind. A single
@@ -46,6 +48,7 @@ type Ports struct {
 	Recorder      revocation.EvidenceRecorder
 	Journal       EvidenceJournal
 	Content       CandidateContent
+	Contract      consumerverification.Contract
 	Now           func() time.Time
 }
 
@@ -72,6 +75,11 @@ func RunRevalidation(ctx context.Context, lookup func(string) string, buildPorts
 // RunRevocation runs the revocation lane controller.
 func RunRevocation(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
 	return run(ctx, OperationRevocation, lookup, buildPorts, stdout, stderr)
+}
+
+// RunConsumerVerification runs the consumer verification lane controller.
+func RunConsumerVerification(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationConsumerVerification, lookup, buildPorts, stdout, stderr)
 }
 
 func run(ctx context.Context, operation Operation, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
@@ -111,8 +119,8 @@ func run(ctx context.Context, operation Operation, lookup func(string) string, b
 }
 
 // checkZone binds each operation to its trust zone: intake runs in the
-// intake zone; admission, promotion, revalidation, and revocation run in the
-// control zone.
+// intake zone; admission, promotion, revalidation, revocation, and the
+// consumer verification run in the control zone.
 func checkZone(operation Operation, zone config.Zone) error {
 	expected, err := zoneFor(operation)
 	if err != nil {
@@ -128,7 +136,7 @@ func zoneFor(operation Operation) (config.Zone, error) {
 	switch operation {
 	case OperationIntake:
 		return config.ZoneIntake, nil
-	case OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation:
+	case OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification:
 		return config.ZoneControl, nil
 	default:
 		return "", fmt.Errorf("unknown operation %q", operation)
@@ -149,6 +157,8 @@ func bind(operation Operation, ports Ports) (any, error) {
 		return revalidation.NewService(ports.Candidates, ports.Policies, ports.Scanner, ports.EvidenceStore)
 	case OperationRevocation:
 		return revocation.NewService(ports.Candidates, ports.Gate, ports.Recorder, ports.Now)
+	case OperationConsumerVerification:
+		return consumerverification.NewService(ports.Candidates, ports.EvidenceStore, ports.Contract)
 	default:
 		return nil, fmt.Errorf("unknown operation %q", operation)
 	}

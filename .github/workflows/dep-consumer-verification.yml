@@ -1,0 +1,83 @@
+name: dep-consumer-verification lane
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Module path of the admitted candidate (for example github.com/google/go-cmp)."
+        required: true
+        type: string
+      version:
+        description: "Version of the admitted candidate (for example v0.7.0)."
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: dep-consumer-verification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  consumer-verification:
+    name: Consumer verification
+    environment: dep-consumer-verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Authenticate the consumer verification trigger identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEP_CONSUMER_VERIFICATION_WIF_PROVIDER }}
+          service_account: ${{ vars.DEP_CONSUMER_VERIFICATION_TRIGGER_SERVICE_ACCOUNT }}
+
+      - name: Invoke the consumer verification workload job
+        id: invoke
+        env:
+          WORKLOAD_JOB: ${{ vars.DEP_CONSUMER_VERIFICATION_WORKLOAD_JOB }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$WORKLOAD_JOB"
+          IFS='/' read -ra SEGMENTS <<< "$WORKLOAD_JOB"
+          PROJECT="${SEGMENTS[1]}"
+          REGION="${SEGMENTS[3]}"
+          JOB="${SEGMENTS[5]}"
+          test -n "$PROJECT"
+          test -n "$REGION"
+          test -n "$JOB"
+          EXECUTION="$(gcloud run jobs execute "$JOB" \
+            --project="$PROJECT" \
+            --region="$REGION" \
+            --update-env-vars="^;^DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }};DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}" \
+            --wait \
+            --format="value(name)")"
+          test -n "$EXECUTION"
+          echo "execution=$EXECUTION" >> "$GITHUB_OUTPUT"
+
+      - name: Read the execution status and report the evidence surface
+        env:
+          WORKLOAD_JOB: ${{ vars.DEP_CONSUMER_VERIFICATION_WORKLOAD_JOB }}
+          EXECUTION: ${{ steps.invoke.outputs.execution }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS='/' read -ra SEGMENTS <<< "$WORKLOAD_JOB"
+          PROJECT="${SEGMENTS[1]}"
+          REGION="${SEGMENTS[3]}"
+          test -n "$EXECUTION"
+          gcloud run jobs executions describe "$EXECUTION" \
+            --project="$PROJECT" \
+            --region="$REGION" \
+            --format=json > execution.json
+          jq -e '.status.completionTime != null and ((.status.succeededCount // 0) >= 1) and ((.status.failedCount // 0) == 0)' execution.json > /dev/null
+          jq -r '"execution: " + .name, "completed: " + .status.completionTime, "evidence audit pointer: " + .status.logUri' execution.json
+          echo "evidence locators: the job writes the content-addressed evidence inside the perimeter; the internal evidence index proves them (dep-evidence-audit)."

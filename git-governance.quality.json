@@ -36,6 +36,10 @@
       {
         "package": "./cmd/dependency-revocation-controller",
         "smoke": ["--version"]
+      },
+      {
+        "package": "./cmd/dependency-consumer-verification-controller",
+        "smoke": ["--version"]
       }
     ],
     "fuzz": [
