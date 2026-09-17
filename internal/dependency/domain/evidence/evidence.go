@@ -27,6 +27,9 @@ const (
 	TypeRevocation  Type = "revocation"
 	// TypeVerification marks the consumer verification record of a candidate.
 	TypeVerification Type = "verification"
+	// TypeOperations marks an operations-evidence record — the class written
+	// only by the evidence-write workload identity, never candidate-bound.
+	TypeOperations Type = "operations"
 )
 
 // Valid reports whether the evidence type belongs to the canonical set.
@@ -34,7 +37,7 @@ func (t Type) Valid() bool {
 	switch t {
 	case TypeSBOM, TypeSignature, TypeProvenance, TypeAttestation, TypeTest,
 		TypeScan, TypeApproval, TypeException, TypePolicy, TypeQuality, TypeRevocation,
-		TypeVerification:
+		TypeVerification, TypeOperations:
 		return true
 	default:
 		return false

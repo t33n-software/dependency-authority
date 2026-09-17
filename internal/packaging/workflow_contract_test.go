@@ -359,10 +359,42 @@ func TestLaneWorkflowsBindTheOperationInputs(t *testing.T) {
 		t.Fatal("the revocation lane does not bind the revocation reason input")
 	}
 
-	for _, lane := range []string{"dep-evidence-write", "dep-evidence-audit"} {
-		content := readRepositoryFile(t, ".github/workflows/"+lane+".yml")
-		if strings.Contains(content, "--update-env-vars") {
-			t.Fatalf("the evidence lane %s must not pass operation inputs; its workload job takes none", lane)
+	// The evidence-write lane carries the attested operation event as
+	// validated dispatch inputs (the human-gated attestation write); the
+	// evidence-audit lane carries the proven subject.
+	evidenceWrite := readRepositoryFile(t, ".github/workflows/dep-evidence-write.yml")
+	for _, needle := range []string{
+		"inputs:",
+		"record_type:",
+		"subject_lane:",
+		"execution:",
+		"outcome:",
+		"evidence_references:",
+		"detail:",
+		"--update-env-vars=",
+		"DEPENDENCY_AUTHORITY_RECORD_TYPE=${{ inputs.record_type }}",
+		"DEPENDENCY_AUTHORITY_SUBJECT_LANE=${{ inputs.subject_lane }}",
+		"DEPENDENCY_AUTHORITY_EXECUTION=${{ inputs.execution }}",
+		"DEPENDENCY_AUTHORITY_OUTCOME=${{ inputs.outcome }}",
+		"DEPENDENCY_AUTHORITY_EVIDENCE_REFERENCES=${{ inputs.evidence_references }}",
+		"DEPENDENCY_AUTHORITY_DETAIL=${{ inputs.detail }}",
+	} {
+		if !strings.Contains(evidenceWrite, needle) {
+			t.Fatalf("the evidence-write lane does not bind %q", needle)
+		}
+	}
+
+	evidenceAudit := readRepositoryFile(t, ".github/workflows/dep-evidence-audit.yml")
+	for _, needle := range []string{
+		"inputs:",
+		"module:",
+		"version:",
+		"--update-env-vars=",
+		"DEPENDENCY_AUTHORITY_MODULE=${{ inputs.module }}",
+		"DEPENDENCY_AUTHORITY_VERSION=${{ inputs.version }}",
+	} {
+		if !strings.Contains(evidenceAudit, needle) {
+			t.Fatalf("the evidence-audit lane does not bind %q", needle)
 		}
 	}
 }
@@ -499,6 +531,8 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 		"dependency-revalidation-controller",
 		"dependency-revocation-controller",
 		"dependency-consumer-verification-controller",
+		"dependency-evidence-write-controller",
+		"dependency-evidence-audit-controller",
 	} {
 		for _, file := range []string{"main.go", "main_test.go"} {
 			path := repositoryPath("cmd", controller, file)
@@ -513,7 +547,7 @@ func TestControllerAndDomainLayoutIsComplete(t *testing.T) {
 			t.Fatalf("missing domain package %q: %v", domain, err)
 		}
 	}
-	for _, application := range []string{"admission", "consumerverification", "intake", "promotion", "revalidation", "revocation"} {
+	for _, application := range []string{"admission", "consumerverification", "evidenceaudit", "evidencewrite", "intake", "promotion", "revalidation", "revocation"} {
 		if _, err := os.Stat(repositoryPath("internal", "dependency", "application", application)); err != nil {
 			t.Fatalf("missing application package %q: %v", application, err)
 		}
@@ -585,8 +619,8 @@ func TestModuleIdentityAndQualityContract(t *testing.T) {
 		!slices.Equal(qualityConfig.Gates[0].Args, []string{"tool", "-modfile", "tools/go.mod", "quality-gate"}) {
 		t.Fatal("the gate does not invoke the canonical gate chain through the tooling module pin")
 	}
-	if len(qualityConfig.Project.Binaries) != 6 {
-		t.Fatalf("the project binaries must carry the six lane controllers, got %d", len(qualityConfig.Project.Binaries))
+	if len(qualityConfig.Project.Binaries) != 8 {
+		t.Fatalf("the project binaries must carry the eight lane controllers, got %d", len(qualityConfig.Project.Binaries))
 	}
 	for _, binary := range qualityConfig.Project.Binaries {
 		if !strings.HasPrefix(binary.Package, "./cmd/dependency-") {
@@ -686,6 +720,8 @@ func TestControllerImageSubstrateBindsTheGovernedBuildForm(t *testing.T) {
 		"dependency-revalidation-controller",
 		"dependency-revocation-controller",
 		"dependency-consumer-verification-controller",
+		"dependency-evidence-write-controller",
+		"dependency-evidence-audit-controller",
 	} {
 		if !strings.Contains(runbook, controller) {
 			t.Fatalf("the controller image runbook does not bind %q", controller)

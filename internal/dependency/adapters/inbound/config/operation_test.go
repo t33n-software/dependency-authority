@@ -143,3 +143,86 @@ func TestOperationInternalsRejectAnUnknownField(t *testing.T) {
 		t.Fatalf("env(unknown) = %q, want empty", got)
 	}
 }
+
+func TestOperationFromEnvBindsTheEvidenceWriteInputs(t *testing.T) {
+	operation, err := OperationFromEnv(operationEnv(map[string]string{
+		EnvRecordType:         " revocation ",
+		EnvSubjectLane:        " dep-revocation ",
+		EnvExecution:          " projects/p/locations/l/jobs/dep-revocation/executions/1 ",
+		EnvOutcome:            " succeeded ",
+		EnvEvidenceReferences: " evidence://a/v1/one.json , evidence://a/v1/two.json ",
+		EnvDetail:             " the deliberate revocation ",
+		EnvLaneIdentity:       "dep-evidence-writer@example.iam.gserviceaccount.com",
+	}), FieldRecordType, FieldSubjectLane, FieldExecution, FieldOutcome, FieldLaneIdentity)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+	if operation.RecordType() != "revocation" {
+		t.Fatalf("RecordType() = %q", operation.RecordType())
+	}
+	if operation.SubjectLane() != "dep-revocation" {
+		t.Fatalf("SubjectLane() = %q", operation.SubjectLane())
+	}
+	if operation.Execution() != "projects/p/locations/l/jobs/dep-revocation/executions/1" {
+		t.Fatalf("Execution() = %q", operation.Execution())
+	}
+	if operation.Outcome() != "succeeded" {
+		t.Fatalf("Outcome() = %q", operation.Outcome())
+	}
+	references := operation.EvidenceReferences()
+	if len(references) != 2 || references[0] != "evidence://a/v1/one.json" || references[1] != "evidence://a/v1/two.json" {
+		t.Fatalf("EvidenceReferences() = %v, want the trimmed pair", references)
+	}
+	if operation.Detail() != "the deliberate revocation" {
+		t.Fatalf("Detail() = %q", operation.Detail())
+	}
+}
+
+func TestOperationFromEnvSplitsTheEmptyReferences(t *testing.T) {
+	operation, err := OperationFromEnv(operationEnv(map[string]string{}))
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+	if len(operation.EvidenceReferences()) != 0 {
+		t.Fatalf("EvidenceReferences() = %v, want an empty list", operation.EvidenceReferences())
+	}
+	if operation.Detail() != "" {
+		t.Fatalf("Detail() = %q, want empty", operation.Detail())
+	}
+}
+
+func TestOperationEvidenceReferencesDefensiveCopy(t *testing.T) {
+	operation, err := OperationFromEnv(operationEnv(map[string]string{
+		EnvEvidenceReferences: "evidence://a/v1/one.json",
+	}))
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+	first := operation.EvidenceReferences()
+	first[0] = "mutated"
+	if operation.EvidenceReferences()[0] == "mutated" {
+		t.Fatal("EvidenceReferences() shares its slice with the caller")
+	}
+}
+
+func TestOperationFromEnvRequiresTheEvidenceWriteFields(t *testing.T) {
+	for name, tc := range map[string]struct {
+		field Field
+		env   string
+	}{
+		"record type":  {FieldRecordType, EnvRecordType},
+		"subject lane": {FieldSubjectLane, EnvSubjectLane},
+		"execution":    {FieldExecution, EnvExecution},
+		"outcome":      {FieldOutcome, EnvOutcome},
+		"references":   {FieldEvidenceReferences, EnvEvidenceReferences},
+		"detail":       {FieldDetail, EnvDetail},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := OperationFromEnv(operationEnv(map[string]string{}), tc.field); err == nil {
+				t.Fatal("OperationFromEnv() error = nil, want a required-field error")
+			} else if !strings.Contains(err.Error(), tc.env) {
+				t.Fatalf("OperationFromEnv() error = %q, want the %s reference", err, tc.env)
+			}
+		})
+	}
+}

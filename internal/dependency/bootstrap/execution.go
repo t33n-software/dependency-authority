@@ -16,6 +16,8 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/scanner"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/consumerverification"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/evidenceaudit"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/evidencewrite"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/revalidation"
@@ -68,6 +70,10 @@ func operationFields(operation Operation) []config.Field {
 		return []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldRevocationReason}
 	case OperationConsumerVerification:
 		return []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe}
+	case OperationEvidenceWrite:
+		return []config.Field{config.FieldRecordType, config.FieldSubjectLane, config.FieldExecution, config.FieldOutcome, config.FieldLaneIdentity}
+	case OperationEvidenceAudit:
+		return []config.Field{config.FieldModule, config.FieldVersion}
 	default:
 		return nil
 	}
@@ -88,6 +94,10 @@ func execute(ctx context.Context, operation Operation, service any, ports Ports,
 		return executeRevocation(ctx, service.(revocation.Service), ports, controllerConfig, operationInput, stdout)
 	case OperationConsumerVerification:
 		return executeConsumerVerification(ctx, service.(consumerverification.Service), ports, controllerConfig, operationInput, stdout)
+	case OperationEvidenceWrite:
+		return executeEvidenceWrite(ctx, service.(evidencewrite.Service), operationInput, stdout)
+	case OperationEvidenceAudit:
+		return executeEvidenceAudit(ctx, service.(evidenceaudit.Service), controllerConfig, operationInput, stdout)
 	default:
 		return fmt.Errorf("unknown operation %q", operation)
 	}
@@ -359,6 +369,38 @@ func executeConsumerVerification(ctx context.Context, service consumerverificati
 	}
 	fmt.Fprintf(stdout, "dependency-consumer-verification-controller: candidate %s %s %s verified proofs=%d\n",
 		ecosystem, name, version, len(report.Results()))
+	return nil
+}
+
+// executeEvidenceWrite writes the operations-evidence record of the attested
+// operation event through the evidence-write identity.
+func executeEvidenceWrite(ctx context.Context, service evidencewrite.Service, operationInput config.Operation, stdout io.Writer) error {
+	reference, err := service.Write(ctx, evidencewrite.WriteInput{
+		RecordType:  evidence.OperationsRecordType(operationInput.RecordType()),
+		SubjectLane: operationInput.SubjectLane(),
+		Execution:   operationInput.Execution(),
+		Outcome:     evidence.OperationsOutcome(operationInput.Outcome()),
+		References:  operationInput.EvidenceReferences(),
+		Detail:      operationInput.Detail(),
+		Issuer:      operationInput.LaneIdentity(),
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "dependency-evidence-write-controller: operations evidence type=%s subject=%s reference=%s\n",
+		operationInput.RecordType(), operationInput.SubjectLane(), reference.Reference())
+	return nil
+}
+
+// executeEvidenceAudit proves the content-addressed locators of the
+// candidate's evidence trail and writes nothing.
+func executeEvidenceAudit(ctx context.Context, service evidenceaudit.Service, controllerConfig config.Config, operationInput config.Operation, stdout io.Writer) error {
+	report, err := service.Prove(ctx, controllerConfig.Ecosystem(), operationInput.Module(), operationInput.Version())
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "dependency-evidence-audit-controller: candidate %s %s %s proven references=%d\n",
+		controllerConfig.Ecosystem(), operationInput.Module(), operationInput.Version(), len(report.References()))
 	return nil
 }
 

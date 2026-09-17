@@ -16,6 +16,8 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/inbound/config"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/consumerverification"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/evidenceaudit"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/evidencewrite"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/revalidation"
@@ -32,24 +34,28 @@ const (
 	OperationRevalidation         Operation = "revalidation"
 	OperationRevocation           Operation = "revocation"
 	OperationConsumerVerification Operation = "consumer-verification"
+	OperationEvidenceWrite        Operation = "evidence-write"
+	OperationEvidenceAudit        Operation = "evidence-audit"
 )
 
 // Ports carries every outbound port a lane controller may bind. A single
 // adapter implementation may satisfy several of these consumer-defined
 // interfaces at once.
 type Ports struct {
-	Upstream      intake.Upstream
-	Scanner       admission.Scanner
-	Policies      admission.Policies
-	Candidates    intake.Candidates
-	EvidenceStore admission.EvidenceStore
-	Registry      promotion.ApprovedRegistry
-	Gate          revocation.DownloadGate
-	Recorder      revocation.EvidenceRecorder
-	Journal       EvidenceJournal
-	Content       CandidateContent
-	Contract      consumerverification.Contract
-	Now           func() time.Time
+	Upstream         intake.Upstream
+	Scanner          admission.Scanner
+	Policies         admission.Policies
+	Candidates       intake.Candidates
+	EvidenceStore    admission.EvidenceStore
+	Registry         promotion.ApprovedRegistry
+	Gate             revocation.DownloadGate
+	Recorder         revocation.EvidenceRecorder
+	Journal          EvidenceJournal
+	Content          CandidateContent
+	Contract         consumerverification.Contract
+	OperationsWriter evidencewrite.OperationsJournal
+	EvidenceProver   evidenceaudit.PayloadProver
+	Now              func() time.Time
 }
 
 // RunIntake runs the intake lane controller.
@@ -80,6 +86,16 @@ func RunRevocation(ctx context.Context, lookup func(string) string, buildPorts P
 // RunConsumerVerification runs the consumer verification lane controller.
 func RunConsumerVerification(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
 	return run(ctx, OperationConsumerVerification, lookup, buildPorts, stdout, stderr)
+}
+
+// RunEvidenceWrite runs the evidence-write lane controller.
+func RunEvidenceWrite(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationEvidenceWrite, lookup, buildPorts, stdout, stderr)
+}
+
+// RunEvidenceAudit runs the evidence-audit lane controller.
+func RunEvidenceAudit(ctx context.Context, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
+	return run(ctx, OperationEvidenceAudit, lookup, buildPorts, stdout, stderr)
 }
 
 func run(ctx context.Context, operation Operation, lookup func(string) string, buildPorts PortsBuilder, stdout io.Writer, stderr io.Writer) int {
@@ -120,7 +136,8 @@ func run(ctx context.Context, operation Operation, lookup func(string) string, b
 
 // checkZone binds each operation to its trust zone: intake runs in the
 // intake zone; admission, promotion, revalidation, revocation, and the
-// consumer verification run in the control zone.
+// consumer verification run in the control zone; the evidence write and audit
+// run in the evidence zone.
 func checkZone(operation Operation, zone config.Zone) error {
 	expected, err := zoneFor(operation)
 	if err != nil {
@@ -138,6 +155,8 @@ func zoneFor(operation Operation) (config.Zone, error) {
 		return config.ZoneIntake, nil
 	case OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification:
 		return config.ZoneControl, nil
+	case OperationEvidenceWrite, OperationEvidenceAudit:
+		return config.ZoneEvidence, nil
 	default:
 		return "", fmt.Errorf("unknown operation %q", operation)
 	}
@@ -159,6 +178,10 @@ func bind(operation Operation, ports Ports) (any, error) {
 		return revocation.NewService(ports.Candidates, ports.Gate, ports.Recorder, ports.Now)
 	case OperationConsumerVerification:
 		return consumerverification.NewService(ports.Candidates, ports.EvidenceStore, ports.Contract)
+	case OperationEvidenceWrite:
+		return evidencewrite.NewService(ports.OperationsWriter, ports.Now)
+	case OperationEvidenceAudit:
+		return evidenceaudit.NewService(ports.EvidenceStore, ports.EvidenceProver)
 	default:
 		return nil, fmt.Errorf("unknown operation %q", operation)
 	}
