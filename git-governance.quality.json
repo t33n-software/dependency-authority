@@ -40,6 +40,14 @@
       {
         "package": "./cmd/dependency-consumer-verification-controller",
         "smoke": ["--version"]
+      },
+      {
+        "package": "./cmd/dependency-evidence-write-controller",
+        "smoke": ["--version"]
+      },
+      {
+        "package": "./cmd/dependency-evidence-audit-controller",
+        "smoke": ["--version"]
       }
     ],
     "fuzz": [

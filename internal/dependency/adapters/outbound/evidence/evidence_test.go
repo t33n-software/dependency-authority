@@ -551,3 +551,187 @@ func TestPutPropagatesReferenceValidation(t *testing.T) {
 		t.Fatal("Put() error = nil, want expiry ordering error")
 	}
 }
+
+// testOperationsRecord builds a valid operations-evidence record.
+func testOperationsRecord(t *testing.T) evidence.OperationsRecord {
+	t.Helper()
+	record, err := evidence.NewOperationsRecord(
+		evidence.OperationsRecordRevocation,
+		"dep-revocation",
+		"projects/p/locations/l/jobs/dep-revocation/executions/1",
+		evidence.OperationsSucceeded,
+		[]string{"evidence://projects/p/locations/l/repositories/r/evidence-payloads-abc/v1/def.json"},
+		"the deliberate revocation of the bound candidate",
+		"dep-evidence-writer@example.iam.gserviceaccount.com",
+		evidenceTime,
+	)
+	if err != nil {
+		t.Fatalf("NewOperationsRecord() error = %v", err)
+	}
+	return record
+}
+
+func TestWriteOperationsPublishesTheRecord(t *testing.T) {
+	var gotURL, gotBody string
+	store := newTestStore(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+		gotURL = req.URL.String()
+		content, _ := io.ReadAll(req.Body)
+		gotBody = string(content)
+		return okResponse(`{"operation": {"name": "operations/1"}}`), nil
+	}))
+
+	reference, err := store.WriteOperations(context.Background(), testOperationsRecord(t))
+	if err != nil {
+		t.Fatalf("WriteOperations() error = %v", err)
+	}
+	if reference.Type() != evidence.TypeOperations {
+		t.Fatalf("WriteOperations() type = %q, want %q", reference.Type(), evidence.TypeOperations)
+	}
+	if reference.Issuer() != "dep-evidence-writer@example.iam.gserviceaccount.com" {
+		t.Fatalf("WriteOperations() issuer = %q", reference.Issuer())
+	}
+	if !reference.IssuedAt().Equal(evidenceTime) {
+		t.Fatalf("WriteOperations() issued-at = %v", reference.IssuedAt())
+	}
+	if _, ok := reference.ExpiresAt(); ok {
+		t.Fatal("WriteOperations() carries an expiry, want an open reference")
+	}
+	if !strings.HasPrefix(reference.Reference(), "evidence://projects/p/locations/l/repositories/r/operations-evidence/v1/") {
+		t.Fatalf("WriteOperations() locator = %q, want the operations-evidence package form", reference.Reference())
+	}
+	if !strings.Contains(gotURL, "/upload/v1/projects/p/locations/l/repositories/r/genericArtifacts:create") {
+		t.Fatalf("WriteOperations() upload URL = %q", gotURL)
+	}
+	for _, fragment := range []string{
+		`"schema":"dependency-authority/operations-evidence/v1"`,
+		`"record_type":"revocation"`,
+		`"subject_lane":"dep-revocation"`,
+		`"outcome":"succeeded"`,
+		`"issuer":"dep-evidence-writer@example.iam.gserviceaccount.com"`,
+	} {
+		if !strings.Contains(gotBody, fragment) {
+			t.Fatalf("WriteOperations() document misses %q", fragment)
+		}
+	}
+}
+
+func TestWriteOperationsPropagatesUploadFailures(t *testing.T) {
+	store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("repository unavailable")
+	}))
+	if _, err := store.WriteOperations(context.Background(), testOperationsRecord(t)); err == nil {
+		t.Fatal("WriteOperations() error = nil, want upload error")
+	}
+
+	store = newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{Status: "409 Conflict", StatusCode: 409, Body: io.NopCloser(strings.NewReader(""))}, nil
+	}))
+	if _, err := store.WriteOperations(context.Background(), testOperationsRecord(t)); err != nil {
+		t.Fatalf("WriteOperations() error = %v, want idempotent success", err)
+	}
+}
+
+func TestFetchPayloadDownloadsTheReferencedPayload(t *testing.T) {
+	name := "projects/p/locations/l/repositories/r/files/evidence-payloads-abc:v1:def.json"
+	store := newTestStore(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.Path, ":download") {
+			return okResponse("payload-content"), nil
+		}
+		return okResponse(`{"files": [{"name": "` + name + `", "owner": "projects/p/locations/l/repositories/r/packages/evidence-payloads-abc/versions/v1"}]}`), nil
+	}))
+	reference := testReference(t, evidence.TypeScan, "evidence://projects/p/locations/l/repositories/r/evidence-payloads-abc/v1/def.json", evidenceTime)
+	content, err := store.FetchPayload(context.Background(), reference)
+	if err != nil {
+		t.Fatalf("FetchPayload() error = %v", err)
+	}
+	if string(content) != "payload-content" {
+		t.Fatalf("FetchPayload() = %q, want the payload content", content)
+	}
+}
+
+func TestFetchPayloadFailsClosed(t *testing.T) {
+	reference := testReference(t, evidence.TypeScan, "evidence://projects/p/locations/l/repositories/r/evidence-payloads-abc/v1/def.json", evidenceTime)
+
+	t.Run("malformed locator", func(t *testing.T) {
+		malformed := testReference(t, evidence.TypeScan, "bogus", evidenceTime)
+		store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+			return okResponse(`{"files": []}`), nil
+		}))
+		if _, err := store.FetchPayload(context.Background(), malformed); err == nil || !strings.Contains(err.Error(), "must carry the evidence:// form") {
+			t.Fatalf("FetchPayload() error = %v, want the locator form failure", err)
+		}
+	})
+
+	t.Run("crosses the bound repository", func(t *testing.T) {
+		foreign := testReference(t, evidence.TypeScan, "evidence://projects/other/locations/l/repositories/r/evidence-payloads-abc/v1/def.json", evidenceTime)
+		store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+			return okResponse(`{"files": []}`), nil
+		}))
+		if _, err := store.FetchPayload(context.Background(), foreign); err == nil || !strings.Contains(err.Error(), "crosses the bound repository") {
+			t.Fatalf("FetchPayload() error = %v, want the cross-repository failure", err)
+		}
+	})
+
+	t.Run("list failure", func(t *testing.T) {
+		store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{Status: "500 Internal Server Error", StatusCode: 500, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}))
+		if _, err := store.FetchPayload(context.Background(), reference); err == nil {
+			t.Fatal("FetchPayload() error = nil, want the list failure")
+		}
+	})
+
+	t.Run("undecodable inventory name", func(t *testing.T) {
+		store := newTestStore(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+			return okResponse(`{"files": [{"name": "projects/p/locations/l/repositories/r/files/evidence-payloads-abc:v1:%zz.json", "owner": "projects/p/locations/l/repositories/r/packages/evidence-payloads-abc/versions/v1"}]}`), nil
+		}))
+		if _, err := store.FetchPayload(context.Background(), reference); err == nil || !strings.Contains(err.Error(), "decode the evidence file resource name") {
+			t.Fatalf("FetchPayload() error = %v, want the decode failure", err)
+		}
+	})
+
+	t.Run("payload not found", func(t *testing.T) {
+		store := newTestStore(t, doerFunc(func(*http.Request) (*http.Response, error) {
+			return okResponse(`{"files": []}`), nil
+		}))
+		if _, err := store.FetchPayload(context.Background(), reference); err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("FetchPayload() error = %v, want the not-found failure", err)
+		}
+	})
+
+	t.Run("download failure", func(t *testing.T) {
+		name := "projects/p/locations/l/repositories/r/files/evidence-payloads-abc:v1:def.json"
+		store := newTestStore(t, doerFunc(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.URL.Path, ":download") {
+				return &http.Response{Status: "404 Not Found", StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil
+			}
+			return okResponse(`{"files": [{"name": "` + name + `", "owner": "projects/p/locations/l/repositories/r/packages/evidence-payloads-abc/versions/v1"}]}`), nil
+		}))
+		if _, err := store.FetchPayload(context.Background(), reference); err == nil {
+			t.Fatal("FetchPayload() error = nil, want the download failure")
+		}
+	})
+}
+
+func TestParseEvidenceLocator(t *testing.T) {
+	repository, packageID, versionID, filename, err := parseEvidenceLocator("evidence://projects/p/locations/l/repositories/r/evidence-payloads-abc/v1/def.json")
+	if err != nil {
+		t.Fatalf("parseEvidenceLocator() error = %v", err)
+	}
+	if repository != "projects/p/locations/l/repositories/r" || packageID != "evidence-payloads-abc" || versionID != "v1" || filename != "def.json" {
+		t.Fatalf("parseEvidenceLocator() = %q %q %q %q", repository, packageID, versionID, filename)
+	}
+
+	for name, locator := range map[string]string{
+		"missing scheme":     "projects/p/locations/l/repositories/r/evidence-payloads-abc/v1/def.json",
+		"missing segments":   "evidence://projects/p/locations/l/repositories/r/v1/def.json",
+		"invalid repository": "evidence://projects/p/locations/l/repositories//evidence-payloads-abc/v1/def.json",
+		"empty segment":      "evidence://projects/p/locations/l/repositories/r/evidence-payloads-abc/v1/",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, _, _, err := parseEvidenceLocator(locator); err == nil {
+				t.Fatalf("parseEvidenceLocator(%q) error = nil, want error", locator)
+			}
+		})
+	}
+}

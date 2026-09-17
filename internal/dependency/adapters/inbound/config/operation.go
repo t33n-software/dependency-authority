@@ -29,6 +29,23 @@ const (
 	// EnvNegativeProbe names the never-admitted reference the consumer
 	// verification lane proves fail-closed at the approved endpoint.
 	EnvNegativeProbe = "DEPENDENCY_AUTHORITY_NEGATIVE_PROBE"
+	// EnvRecordType names the operations-evidence record type the
+	// evidence-write lane attests.
+	EnvRecordType = "DEPENDENCY_AUTHORITY_RECORD_TYPE"
+	// EnvSubjectLane names the lane operation the evidence-write lane
+	// attests.
+	EnvSubjectLane = "DEPENDENCY_AUTHORITY_SUBJECT_LANE"
+	// EnvExecution names the execution reference the evidence-write lane
+	// attests.
+	EnvExecution = "DEPENDENCY_AUTHORITY_EXECUTION"
+	// EnvOutcome names the operation outcome the evidence-write lane attests.
+	EnvOutcome = "DEPENDENCY_AUTHORITY_OUTCOME"
+	// EnvEvidenceReferences names the comma-separated evidence locators the
+	// attested operation produced.
+	EnvEvidenceReferences = "DEPENDENCY_AUTHORITY_EVIDENCE_REFERENCES"
+	// EnvDetail names the optional free-text detail of the operations
+	// attestation.
+	EnvDetail = "DEPENDENCY_AUTHORITY_DETAIL"
 )
 
 // Field identifies one lane operation input binding.
@@ -53,6 +70,24 @@ const (
 	// FieldNegativeProbe is the never-admitted reference input of the consumer
 	// verification lane.
 	FieldNegativeProbe
+	// FieldRecordType is the operations-evidence record type input of the
+	// evidence-write lane.
+	FieldRecordType
+	// FieldSubjectLane is the attested lane operation input of the
+	// evidence-write lane.
+	FieldSubjectLane
+	// FieldExecution is the attested execution reference input of the
+	// evidence-write lane.
+	FieldExecution
+	// FieldOutcome is the attested operation outcome input of the
+	// evidence-write lane.
+	FieldOutcome
+	// FieldEvidenceReferences is the evidence locator list input of the
+	// evidence-write lane.
+	FieldEvidenceReferences
+	// FieldDetail is the optional attestation detail input of the
+	// evidence-write lane.
+	FieldDetail
 )
 
 // env names the environment variable carrying the field.
@@ -74,6 +109,18 @@ func (f Field) env() string {
 		return EnvRevocationReason
 	case FieldNegativeProbe:
 		return EnvNegativeProbe
+	case FieldRecordType:
+		return EnvRecordType
+	case FieldSubjectLane:
+		return EnvSubjectLane
+	case FieldExecution:
+		return EnvExecution
+	case FieldOutcome:
+		return EnvOutcome
+	case FieldEvidenceReferences:
+		return EnvEvidenceReferences
+	case FieldDetail:
+		return EnvDetail
 	default:
 		return ""
 	}
@@ -89,6 +136,12 @@ type Operation struct {
 	approvalTTL             time.Duration
 	revocationReason        string
 	negativeProbe           string
+	recordType              string
+	subjectLane             string
+	execution               string
+	outcome                 string
+	evidenceReferences      []string
+	detail                  string
 }
 
 // OperationFromEnv loads the operation inputs from the process environment
@@ -105,6 +158,12 @@ func OperationFromEnv(lookup func(string) string, required ...Field) (Operation,
 		scannerDatabaseIdentity: strings.TrimSpace(lookup(EnvScannerDatabaseIdentity)),
 		revocationReason:        strings.TrimSpace(lookup(EnvRevocationReason)),
 		negativeProbe:           strings.TrimSpace(lookup(EnvNegativeProbe)),
+		recordType:              strings.TrimSpace(lookup(EnvRecordType)),
+		subjectLane:             strings.TrimSpace(lookup(EnvSubjectLane)),
+		execution:               strings.TrimSpace(lookup(EnvExecution)),
+		outcome:                 strings.TrimSpace(lookup(EnvOutcome)),
+		evidenceReferences:      splitReferences(lookup(EnvEvidenceReferences)),
+		detail:                  strings.TrimSpace(lookup(EnvDetail)),
 	}
 	if raw := strings.TrimSpace(lookup(EnvApprovalTTL)); raw != "" {
 		ttl, err := time.ParseDuration(raw)
@@ -156,6 +215,18 @@ func (o Operation) value(field Field) string {
 		return o.revocationReason
 	case FieldNegativeProbe:
 		return o.negativeProbe
+	case FieldRecordType:
+		return o.recordType
+	case FieldSubjectLane:
+		return o.subjectLane
+	case FieldExecution:
+		return o.execution
+	case FieldOutcome:
+		return o.outcome
+	case FieldEvidenceReferences:
+		return strings.Join(o.evidenceReferences, ",")
+	case FieldDetail:
+		return o.detail
 	default:
 		return ""
 	}
@@ -200,4 +271,50 @@ func (o Operation) RevocationReason() string {
 // verification lane proves fail-closed.
 func (o Operation) NegativeProbe() string {
 	return o.negativeProbe
+}
+
+// RecordType returns the operations-evidence record type the evidence-write
+// lane attests.
+func (o Operation) RecordType() string {
+	return o.recordType
+}
+
+// SubjectLane returns the lane operation the evidence-write lane attests.
+func (o Operation) SubjectLane() string {
+	return o.subjectLane
+}
+
+// Execution returns the execution reference the evidence-write lane attests.
+func (o Operation) Execution() string {
+	return o.execution
+}
+
+// Outcome returns the operation outcome the evidence-write lane attests.
+func (o Operation) Outcome() string {
+	return o.outcome
+}
+
+// EvidenceReferences returns a defensive copy of the evidence locators the
+// attested operation produced.
+func (o Operation) EvidenceReferences() []string {
+	owned := make([]string, len(o.evidenceReferences))
+	copy(owned, o.evidenceReferences)
+	return owned
+}
+
+// Detail returns the optional free-text detail of the operations attestation.
+func (o Operation) Detail() string {
+	return o.detail
+}
+
+// splitReferences parses the comma-separated evidence reference list binding:
+// every entry is trimmed, and empty entries are dropped.
+func splitReferences(raw string) []string {
+	references := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			references = append(references, trimmed)
+		}
+	}
+	return references
 }

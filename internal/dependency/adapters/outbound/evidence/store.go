@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
@@ -216,6 +218,109 @@ func decodeRecord(content []byte) (recordDocument, error) {
 func sha256Sum(content []byte) []byte {
 	sum := sha256.Sum256(content)
 	return sum[:]
+}
+
+// operationsEvidenceSchema binds the operations-evidence record document
+// shape.
+const operationsEvidenceSchema = "dependency-authority/operations-evidence/v1"
+
+// operationsEvidencePackage is the fixed generic-artifact package grouping
+// the operations-evidence records of every operation.
+const operationsEvidencePackage = "operations-evidence"
+
+// operationsDocument is the canonical operations-evidence record document.
+type operationsDocument struct {
+	Schema      string   `json:"schema"`
+	RecordType  string   `json:"record_type"`
+	SubjectLane string   `json:"subject_lane"`
+	Execution   string   `json:"execution"`
+	Outcome     string   `json:"outcome"`
+	References  []string `json:"references"`
+	Detail      string   `json:"detail,omitempty"`
+	Issuer      string   `json:"issuer"`
+	IssuedAt    string   `json:"issued_at"`
+}
+
+// WriteOperations publishes one operations-evidence record content-addressed
+// into the bound repository. The operations class is never candidate-bound:
+// every record lands in the fixed operations-evidence package. Re-publishing
+// an identical record is an idempotent success.
+func (s Store) WriteOperations(ctx context.Context, record evidence.OperationsRecord) (evidence.Reference, error) {
+	document := operationsDocument{
+		Schema:      operationsEvidenceSchema,
+		RecordType:  string(record.RecordType()),
+		SubjectLane: record.SubjectLane(),
+		Execution:   record.Execution(),
+		Outcome:     string(record.Outcome()),
+		References:  record.References(),
+		Detail:      record.Detail(),
+		Issuer:      record.Issuer(),
+		IssuedAt:    record.IssuedAt().UTC().Format(time.RFC3339Nano),
+	}
+	// The document carries only strings and a string slice, so marshaling
+	// cannot fail.
+	content, _ := json.Marshal(document)
+	filename := hex.EncodeToString(sha256Sum(content)) + ".json"
+	if err := s.transport.upload(ctx, s.repository, operationsEvidencePackage, recordVersion, filename, content); err != nil {
+		return evidence.Reference{}, err
+	}
+	locator := "evidence://" + s.repository + "/" + operationsEvidencePackage + "/" + recordVersion + "/" + filename
+	// The reference construction is total: the record was validated by its
+	// constructor, and the locator and digest derive from the written content.
+	reference, _ := evidence.NewReference(evidence.TypeOperations, locator, "sha256:"+hex.EncodeToString(sha256Sum(content)), record.Issuer(), record.IssuedAt(), nil)
+	return reference, nil
+}
+
+// FetchPayload downloads one referenced evidence payload by its
+// content-addressed locator and returns its bytes. The platform carries the
+// file path URL-encoded in the inventory resource name, so the comparison
+// runs on the canonical decoded form while the download keeps the
+// server-issued name.
+func (s Store) FetchPayload(ctx context.Context, reference evidence.Reference) ([]byte, error) {
+	repository, packageID, versionID, filename, err := parseEvidenceLocator(reference.Reference())
+	if err != nil {
+		return nil, err
+	}
+	if repository != s.repository {
+		return nil, fmt.Errorf("evidence locator %q crosses the bound repository %q", reference.Reference(), s.repository)
+	}
+	files, err := s.transport.list(ctx, repository, packageID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	want := repository + "/files/" + packageID + ":" + versionID + ":" + filename
+	for _, file := range files {
+		decoded, err := url.PathUnescape(file.Name)
+		if err != nil {
+			return nil, fmt.Errorf("decode the evidence file resource name %q: %w", file.Name, err)
+		}
+		if decoded == want {
+			return s.transport.download(ctx, file.Name)
+		}
+	}
+	return nil, fmt.Errorf("evidence payload %q not found in %q", reference.Reference(), repository)
+}
+
+// parseEvidenceLocator parses one content-addressed evidence locator of the
+// form evidence://<repository>/<package>/<version>/<filename>.
+func parseEvidenceLocator(locator string) (repository string, packageID string, versionID string, filename string, err error) {
+	rest, found := strings.CutPrefix(locator, "evidence://")
+	if !found {
+		return "", "", "", "", fmt.Errorf("evidence locator %q must carry the evidence:// form", locator)
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 9 {
+		return "", "", "", "", fmt.Errorf("evidence locator %q must carry the repository, package, version, and filename segments", locator)
+	}
+	repository = strings.Join(parts[:6], "/")
+	if err := parseRepository(repository); err != nil {
+		return "", "", "", "", err
+	}
+	packageID, versionID, filename = parts[6], parts[7], parts[8]
+	if packageID == "" || versionID == "" || filename == "" {
+		return "", "", "", "", fmt.Errorf("evidence locator %q must not carry empty segments", locator)
+	}
+	return repository, packageID, versionID, filename, nil
 }
 
 var (

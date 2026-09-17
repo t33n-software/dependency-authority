@@ -166,6 +166,42 @@ func (f *fakeJournal) Record(_ context.Context, _ candidate.Candidate, reference
 	return nil
 }
 
+// fakeOperationsWriter mirrors the operations-evidence write port.
+type fakeOperationsWriter struct {
+	err     error
+	records []evidence.OperationsRecord
+}
+
+func (f *fakeOperationsWriter) WriteOperations(_ context.Context, record evidence.OperationsRecord) (evidence.Reference, error) {
+	if f.err != nil {
+		return evidence.Reference{}, f.err
+	}
+	f.records = append(f.records, record)
+	sum := sha256.Sum256([]byte(record.Execution()))
+	reference, err := evidence.NewReference(evidence.TypeOperations, "evidence://fake/operations/"+hex.EncodeToString(sum[:]), "sha256:"+hex.EncodeToString(sum[:]), record.Issuer(), record.IssuedAt(), nil)
+	if err != nil {
+		return evidence.Reference{}, err
+	}
+	return reference, nil
+}
+
+// fakePayloadProver mirrors the evidence payload proof port.
+type fakePayloadProver struct {
+	payloads map[string][]byte
+	err      error
+}
+
+func (f *fakePayloadProver) FetchPayload(_ context.Context, reference evidence.Reference) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	payload, found := f.payloads[reference.Reference()]
+	if !found {
+		return nil, errors.New("payload not found")
+	}
+	return payload, nil
+}
+
 func testPolicy(t *testing.T) admission.Policy {
 	t.Helper()
 	// The required scan evidence and the enforced ceiling make the evaluation
@@ -209,18 +245,20 @@ func fullPorts(t *testing.T) Ports {
 	t.Helper()
 	journal := &fakeJournal{}
 	return Ports{
-		Upstream:      fakeUpstream{digest: testDigest},
-		Scanner:       fakeScanner{result: admission.ScanResult{MaxCVSS: 2.0, Licenses: []string{"MIT"}}},
-		Policies:      fakePolicies{policy: testPolicy(t)},
-		Candidates:    &fakeCandidates{},
-		EvidenceStore: fakeEvidenceStore{},
-		Registry:      &fakeRegistry{},
-		Gate:          &fakeGate{},
-		Recorder:      journal,
-		Journal:       journal,
-		Content:       &fakeCandidateContent{},
-		Contract:      &fakeContract{},
-		Now:           func() time.Time { return laneTime },
+		Upstream:         fakeUpstream{digest: testDigest},
+		Scanner:          fakeScanner{result: admission.ScanResult{MaxCVSS: 2.0, Licenses: []string{"MIT"}}},
+		Policies:         fakePolicies{policy: testPolicy(t)},
+		Candidates:       &fakeCandidates{},
+		EvidenceStore:    fakeEvidenceStore{},
+		Registry:         &fakeRegistry{},
+		Gate:             &fakeGate{},
+		Recorder:         journal,
+		Journal:          journal,
+		Content:          &fakeCandidateContent{},
+		Contract:         &fakeContract{},
+		OperationsWriter: &fakeOperationsWriter{},
+		EvidenceProver:   &fakePayloadProver{},
+		Now:              func() time.Time { return laneTime },
 	}
 }
 
@@ -311,6 +349,12 @@ func operationInputs() map[string]string {
 		config.EnvRevocationReason:        "confirmed supply chain incident",
 		config.EnvNegativeProbe:           "example.invalid/never-admitted@v0.0.0",
 		config.EnvPolicyBundle:            ".build/policy/go.json",
+		config.EnvRecordType:              "revocation",
+		config.EnvSubjectLane:             "dep-revocation",
+		config.EnvExecution:               "projects/p/locations/l/jobs/dep-revocation/executions/1",
+		config.EnvOutcome:                 "succeeded",
+		config.EnvEvidenceReferences:      "evidence://projects/p/locations/l/repositories/r/evidence-payloads-abc/v1/def.json",
+		config.EnvDetail:                  "the deliberate revocation",
 	}
 }
 
@@ -420,6 +464,29 @@ func TestRunFailsClosedOnChannelMaterializationError(t *testing.T) {
 	}
 }
 
+// evidenceWriteLanePorts carries the full port set of the evidence-write
+// lane.
+func evidenceWriteLanePorts(t *testing.T) Ports {
+	t.Helper()
+	return fullPorts(t)
+}
+
+// evidenceAuditLanePorts carries the evidence trail and the matching payload
+// proof surface of the evidence-audit lane.
+func evidenceAuditLanePorts(t *testing.T) Ports {
+	t.Helper()
+	ports := fullPorts(t)
+	payload := []byte(`{"ok":true}`)
+	sum := sha256.Sum256(payload)
+	reference, err := evidence.NewReference(evidence.TypeScan, "evidence://fake/payloads/1.json", "sha256:"+hex.EncodeToString(sum[:]), "issuer", laneTime, nil)
+	if err != nil {
+		t.Fatalf("NewReference() error = %v", err)
+	}
+	ports.EvidenceStore = fakeEvidenceStore{trail: []evidence.Reference{reference}}
+	ports.EvidenceProver = &fakePayloadProver{payloads: map[string][]byte{reference.Reference(): payload}}
+	return ports
+}
+
 func TestLaneWrappers(t *testing.T) {
 	stubBundle(t)
 	stubChannelMaterialization(t)
@@ -436,6 +503,8 @@ func TestLaneWrappers(t *testing.T) {
 		{"revalidation", RunRevalidation, "control", revalidationLanePorts, "dependency-revalidation-controller: candidate"},
 		{"revocation", RunRevocation, "control", revocationLanePorts, "state=revoked download_block=true"},
 		{"consumer-verification", RunConsumerVerification, "control", consumerVerificationLanePorts, "verified proofs=5"},
+		{"evidence-write", RunEvidenceWrite, "evidence", evidenceWriteLanePorts, "operations evidence type=revocation"},
+		{"evidence-audit", RunEvidenceAudit, "evidence", evidenceAuditLanePorts, "proven references=1"},
 	}
 	for _, lane := range lanes {
 		t.Run(lane.name, func(t *testing.T) {
@@ -463,6 +532,14 @@ func TestCheckZone(t *testing.T) {
 	if err := checkZone(OperationIntake, config.ZoneIntake); err != nil {
 		t.Errorf("checkZone(intake, intake) error = %v", err)
 	}
+	for _, operation := range []Operation{OperationEvidenceWrite, OperationEvidenceAudit} {
+		if err := checkZone(operation, config.ZoneEvidence); err != nil {
+			t.Errorf("checkZone(%q, evidence) error = %v", operation, err)
+		}
+		if err := checkZone(operation, config.ZoneControl); err == nil {
+			t.Errorf("checkZone(%q, control) error = nil, want zone error", operation)
+		}
+	}
 	if err := checkZone(Operation("bogus"), config.ZoneControl); err == nil {
 		t.Error("checkZone(bogus) error = nil, want unknown operation error")
 	}
@@ -476,7 +553,7 @@ func TestZoneForRejectsUnknownOperation(t *testing.T) {
 
 func TestBindFailsClosedOnUnboundPorts(t *testing.T) {
 	for _, operation := range []Operation{
-		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification,
+		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification, OperationEvidenceWrite, OperationEvidenceAudit,
 	} {
 		if _, err := bind(operation, Ports{}); err == nil {
 			t.Errorf("bind(%q, empty ports) error = nil, want unbound port error", operation)
@@ -486,7 +563,7 @@ func TestBindFailsClosedOnUnboundPorts(t *testing.T) {
 
 func TestBindSucceedsWithFullPorts(t *testing.T) {
 	for _, operation := range []Operation{
-		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification,
+		OperationIntake, OperationAdmission, OperationPromotion, OperationRevalidation, OperationRevocation, OperationConsumerVerification, OperationEvidenceWrite, OperationEvidenceAudit,
 	} {
 		if _, err := bind(operation, fullPorts(t)); err != nil {
 			t.Errorf("bind(%q, full ports) error = %v", operation, err)

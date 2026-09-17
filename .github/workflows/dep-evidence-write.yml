@@ -2,6 +2,31 @@ name: dep-evidence-write lane
 
 on:
   workflow_dispatch:
+    inputs:
+      record_type:
+        description: "The operations-evidence record type (lane-run, operation, revalidation, revocation, quarantine, retention)."
+        required: true
+        type: string
+      subject_lane:
+        description: "The lane operation the attestation describes (for example dep-revocation)."
+        required: true
+        type: string
+      execution:
+        description: "The execution reference of the attested operation."
+        required: true
+        type: string
+      outcome:
+        description: "The attested operation outcome (succeeded or failed)."
+        required: true
+        type: string
+      evidence_references:
+        description: "The comma-separated evidence locators the attested operation produced (may be empty)."
+        required: false
+        type: string
+      detail:
+        description: "An optional free-text detail of the attestation."
+        required: false
+        type: string
 
 permissions: {}
 
@@ -48,6 +73,7 @@ jobs:
           EXECUTION="$(gcloud run jobs execute "$JOB" \
             --project="$PROJECT" \
             --region="$REGION" \
+            --update-env-vars="^;^DEPENDENCY_AUTHORITY_RECORD_TYPE=${{ inputs.record_type }};DEPENDENCY_AUTHORITY_SUBJECT_LANE=${{ inputs.subject_lane }};DEPENDENCY_AUTHORITY_EXECUTION=${{ inputs.execution }};DEPENDENCY_AUTHORITY_OUTCOME=${{ inputs.outcome }};DEPENDENCY_AUTHORITY_EVIDENCE_REFERENCES=${{ inputs.evidence_references }};DEPENDENCY_AUTHORITY_DETAIL=${{ inputs.detail }}" \
             --wait \
             --format="value(name)")"
           test -n "$EXECUTION"

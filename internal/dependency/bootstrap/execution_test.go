@@ -17,6 +17,8 @@ import (
 	"github.com/t33n-software/dependency-authority/internal/dependency/adapters/outbound/policy"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/admission"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/consumerverification"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/evidenceaudit"
+	"github.com/t33n-software/dependency-authority/internal/dependency/application/evidencewrite"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/intake"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/promotion"
 	"github.com/t33n-software/dependency-authority/internal/dependency/application/revalidation"
@@ -1371,6 +1373,8 @@ func TestExecuteRoutesEveryLane(t *testing.T) {
 		{OperationRevalidation, revalidationLanePorts, []config.Field{config.FieldModule, config.FieldVersion, config.FieldScannerIdentity, config.FieldScannerDatabaseIdentity}, "decision=admit"},
 		{OperationRevocation, revocationLanePorts, []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldRevocationReason}, "state=revoked"},
 		{OperationConsumerVerification, consumerVerificationLanePorts, []config.Field{config.FieldModule, config.FieldVersion, config.FieldLaneIdentity, config.FieldNegativeProbe}, "verified proofs=5"},
+		{OperationEvidenceWrite, evidenceWriteLanePorts, []config.Field{config.FieldRecordType, config.FieldSubjectLane, config.FieldExecution, config.FieldOutcome, config.FieldLaneIdentity}, "operations evidence type=revocation"},
+		{OperationEvidenceAudit, evidenceAuditLanePorts, []config.Field{config.FieldModule, config.FieldVersion}, "proven references=1"},
 	}
 	for _, lane := range lanes {
 		t.Run(string(lane.operation), func(t *testing.T) {
@@ -1385,5 +1389,93 @@ func TestExecuteRoutesEveryLane(t *testing.T) {
 				t.Fatalf("stdout = %q, want %q", stdout.String(), lane.want)
 			}
 		})
+	}
+}
+
+// operationsWriterOfPorts returns the fake operations writer of the lane
+// ports.
+func operationsWriterOfPorts(t *testing.T, ports Ports) *fakeOperationsWriter {
+	t.Helper()
+	writer, ok := ports.OperationsWriter.(*fakeOperationsWriter)
+	if !ok {
+		t.Fatal("ports.OperationsWriter is not the fake operations writer")
+	}
+	return writer
+}
+
+func TestExecuteEvidenceWriteRecordsTheAttestation(t *testing.T) {
+	ports := evidenceWriteLanePorts(t)
+	service := laneService(t, OperationEvidenceWrite, ports).(evidencewrite.Service)
+
+	var stdout bytes.Buffer
+	err := executeEvidenceWrite(context.Background(), service, laneOperation(t, config.FieldRecordType, config.FieldSubjectLane, config.FieldExecution, config.FieldOutcome, config.FieldLaneIdentity), &stdout)
+	if err != nil {
+		t.Fatalf("executeEvidenceWrite() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "operations evidence type=revocation subject=dep-revocation") {
+		t.Fatalf("stdout = %q, want the attestation line", stdout.String())
+	}
+	writer := operationsWriterOfPorts(t, ports)
+	if len(writer.records) != 1 {
+		t.Fatalf("operations records = %d, want 1", len(writer.records))
+	}
+	record := writer.records[0]
+	if record.RecordType() != evidence.OperationsRecordRevocation || record.SubjectLane() != "dep-revocation" || record.Outcome() != evidence.OperationsSucceeded {
+		t.Fatalf("operations record = %#v", record)
+	}
+	if record.Issuer() != "dep-admission-controller@example.iam.gserviceaccount.com" {
+		t.Fatalf("operations record issuer = %q", record.Issuer())
+	}
+}
+
+func TestExecuteEvidenceWritePropagatesTheValidationError(t *testing.T) {
+	ports := evidenceWriteLanePorts(t)
+	service := laneService(t, OperationEvidenceWrite, ports).(evidencewrite.Service)
+	values := mergedLaneValues(t)
+	values[config.EnvRecordType] = "bogus"
+	operation, err := config.OperationFromEnv(laneEnv("evidence", values), config.FieldRecordType, config.FieldSubjectLane, config.FieldExecution, config.FieldOutcome, config.FieldLaneIdentity)
+	if err != nil {
+		t.Fatalf("OperationFromEnv() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	if err := executeEvidenceWrite(context.Background(), service, operation, &stdout); err == nil {
+		t.Fatal("executeEvidenceWrite() error = nil, want the record validation failure")
+	}
+}
+
+func TestExecuteEvidenceWritePropagatesTheJournalError(t *testing.T) {
+	ports := evidenceWriteLanePorts(t)
+	ports.OperationsWriter = &fakeOperationsWriter{err: errors.New("store unavailable")}
+	service := laneService(t, OperationEvidenceWrite, ports).(evidencewrite.Service)
+
+	var stdout bytes.Buffer
+	if err := executeEvidenceWrite(context.Background(), service, laneOperation(t, config.FieldRecordType, config.FieldSubjectLane, config.FieldExecution, config.FieldOutcome, config.FieldLaneIdentity), &stdout); err == nil {
+		t.Fatal("executeEvidenceWrite() error = nil, want the journal failure")
+	}
+}
+
+func TestExecuteEvidenceAuditProvesTheTrail(t *testing.T) {
+	ports := evidenceAuditLanePorts(t)
+	service := laneService(t, OperationEvidenceAudit, ports).(evidenceaudit.Service)
+
+	var stdout bytes.Buffer
+	err := executeEvidenceAudit(context.Background(), service, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion), &stdout)
+	if err != nil {
+		t.Fatalf("executeEvidenceAudit() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "candidate go github.com/google/go-cmp v0.7.0 proven references=1") {
+		t.Fatalf("stdout = %q, want the proof line", stdout.String())
+	}
+}
+
+func TestExecuteEvidenceAuditPropagatesTheProofFailure(t *testing.T) {
+	ports := evidenceAuditLanePorts(t)
+	ports.EvidenceProver = &fakePayloadProver{err: errors.New("store unavailable")}
+	service := laneService(t, OperationEvidenceAudit, ports).(evidenceaudit.Service)
+
+	var stdout bytes.Buffer
+	if err := executeEvidenceAudit(context.Background(), service, controlConfig(t), laneOperation(t, config.FieldModule, config.FieldVersion), &stdout); err == nil {
+		t.Fatal("executeEvidenceAudit() error = nil, want the proof failure")
 	}
 }

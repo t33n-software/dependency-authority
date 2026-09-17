@@ -10,13 +10,15 @@ release class.
 ## Bound form
 
 - Exactly one versioned `Dockerfile` at the repository root, parameterized by
-  `ARG CONTROLLER` over the six lane controllers:
+  `ARG CONTROLLER` over the eight lane controllers:
   - `dependency-intake-controller`
   - `dependency-admission-controller`
   - `dependency-promotion-controller`
   - `dependency-revalidation-controller`
   - `dependency-revocation-controller`
   - `dependency-consumer-verification-controller`
+  - `dependency-evidence-write-controller`
+  - `dependency-evidence-audit-controller`
 - The consumer verification controller image is the toolchain-bearing
   variant: it additionally carries the pinned Go distribution tree under
   `/toolchain/` (bound as `DEPENDENCY_AUTHORITY_GO_TOOL=/toolchain/bin/go`),
@@ -128,7 +130,7 @@ docker run --rm <image> --version
 The packaging contract tests bind the substrate fail-closed: the
 digest-pinned base, the `ARG CONTROLLER` parametrization, the `ARG TOOLCHAIN`
 variant form, the non-root user, the absent syntax frontend reference, the
-six controller names, the distribution pin of the toolchain-bearing variant
+eight controller names, the distribution pin of the toolchain-bearing variant
 (fail-closed coupled to the `toolchain` directive of `go.mod`), and the
 bindings of this runbook. The governed quality
 gate runs them on every shared-line change.
