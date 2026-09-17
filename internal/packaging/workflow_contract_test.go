@@ -829,6 +829,72 @@ func TestGoDistributionPinBindsTheToolchainDirective(t *testing.T) {
 	}
 }
 
+// TestOperationsCarryTheWorkloadImageExceptionWindow binds the exception
+// window boilerplate of the workload-image lifecycle convention: every
+// workload-image-producing project carries the only human deletion path as a
+// placeholder-driven script on its operations surface — the proven window
+// form (the role-content proof, the live-bound guard, the registry-class
+// guard, the grant with its read-back proof, the propagation window, the
+// complete delete, the inventory arbiter and the finally hardening) — and
+// never a concrete organization value.
+func TestOperationsCarryTheWorkloadImageExceptionWindow(t *testing.T) {
+	script := readRepositoryFile(t, filepath.Join("docs", "operations", "Invoke-WorkloadImageExceptionWindow.ps1"))
+	for _, required := range []string{
+		"$OperatorMember",
+		"$ControlProjectId",
+		"$Region",
+		"$RepositoryName",
+		"$ImageName",
+		"$Digest",
+		"$InstanceCheckoutPath",
+		"roles/artifactregistry.admin",
+		"artifactregistry.versions.delete",
+		"artifactregistry.dockerimages.list",
+		"staging-controller-images",
+		"release-controller-images",
+		"--delete-tags",
+		"--format=none",
+		"workload-jobs.yaml",
+		`--format="value(account)"`,
+		`--format="value(includedPermissions)"`,
+		"ConvertFrom-Json",
+		"Start-Sleep",
+		"finally",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("the workload-image exception window script does not bind %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"t33n",
+		"test-software",
+		"test-go-builder",
+		"europe-west3",
+		"dep-control",
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("the workload-image exception window script carries the concrete organization value %q; the boilerplate binds every zone, project, registry and identity as a variable", forbidden)
+		}
+	}
+	// A 64-hex run after the digest marker is a concrete digest, never a
+	// placeholder: the boilerplate carries the digest as a head variable only.
+	rest := script
+	for {
+		index := strings.Index(rest, "sha256:")
+		if index < 0 {
+			break
+		}
+		rest = rest[index+len("sha256:"):]
+		run := 0
+		for run < len(rest) && isHex(rest[run:run+1]) {
+			run++
+		}
+		if run >= 64 {
+			t.Fatal("the workload-image exception window script carries a concrete digest; the boilerplate binds the digest as a head variable")
+		}
+	}
+}
+
 // goModToolchainDirective extracts the version token of the toolchain
 // directive of go.mod; the distribution pin is coupled to exactly this token.
 func goModToolchainDirective(t *testing.T) string {
