@@ -27,10 +27,10 @@ type bindingManifest struct {
 		SHA256 string `json:"sha256"`
 	} `json:"callers"`
 	Files struct {
-		Lefthook      fileBinding `json:"lefthook"`
-		Gitattributes fileBinding `json:"gitattributes"`
-		Gitignore     fileBinding `json:"gitignore"`
-		Dependabot    fileBinding `json:"dependabot"`
+		Lefthook      fileBinding      `json:"lefthook"`
+		Gitattributes fileBinding      `json:"gitattributes"`
+		Gitignore     gitignoreBinding `json:"gitignore"`
+		Dependabot    fileBinding      `json:"dependabot"`
 	} `json:"files"`
 	Codeowners struct {
 		Path         string `json:"path"`
@@ -41,6 +41,15 @@ type bindingManifest struct {
 type fileBinding struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
+}
+
+// gitignoreBinding mirrors the fragment-composition binding of the gitignore
+// topic (repo-bindings/v2): the ordered fragment list renders the governed
+// region whose hash the manifest binds.
+type gitignoreBinding struct {
+	Path      string   `json:"path"`
+	Fragments []string `json:"fragments"`
+	SHA256    string   `json:"sha256"`
 }
 
 func readBindingManifest(t *testing.T) bindingManifest {
@@ -111,11 +120,26 @@ func TestCanonicalFileFamilyMatchesTheBindingManifest(t *testing.T) {
 			t.Fatalf("the canonical file %s hashes to %s, want the bound %s", topic.Path, hash, topic.SHA256)
 		}
 	}
-	// The gitignore topic is prefix-mode in the home verifier: the canonical
-	// core is a verbatim prefix and project additions live below the mark.
-	gitignore := readRepositoryFile(t, manifest.Files.Gitignore.Path)
-	if !strings.HasSuffix(gitignore, "# -- project additions below this line --\n") {
-		t.Fatal("the gitignore does not carry the canonical core with the project-block mark")
+	// The gitignore topic is the fragment-composition form in the home
+	// verifier: the bound fragment list renders the governed region at the
+	// bound home pin, and the tenant file carries that region as a verbatim
+	// prefix with the free project block below exactly one mark. The
+	// home-side re-render proof against the pinned tree is owned by the
+	// verify-canonical tool; this test binds the tenant file to the
+	// manifest.
+	gitignore := strings.ReplaceAll(readRepositoryFile(t, manifest.Files.Gitignore.Path), "\r\n", "\n")
+	stamp := "# canonical: gitignore " + strings.Join(manifest.Files.Gitignore.Fragments, " + ") + " @ " + manifest.Home.SHA + " — governed region, do not edit\n"
+	if !strings.HasPrefix(gitignore, stamp) {
+		t.Fatal("the gitignore does not carry the canonical stamp of the bound fragments at the bound home pin")
+	}
+	const projectBlockMark = "# -- project additions below this line --"
+	if strings.Count(gitignore, projectBlockMark) != 1 {
+		t.Fatal("the gitignore does not carry exactly one project-block mark")
+	}
+	region, _, _ := strings.Cut(gitignore, projectBlockMark+"\n")
+	region += projectBlockMark + "\n"
+	if sum := sha256.Sum256([]byte(region)); hex.EncodeToString(sum[:]) != manifest.Files.Gitignore.SHA256 {
+		t.Fatalf("the gitignore governed region hashes to %s, want the bound %s", hex.EncodeToString(sum[:]), manifest.Files.Gitignore.SHA256)
 	}
 
 	codeowners := readRepositoryFile(t, manifest.Codeowners.Path)
