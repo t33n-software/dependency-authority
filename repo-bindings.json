@@ -1,8 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "home": {
     "repository": "t33n-software/repository-governance",
-    "sha": "f38487662a91b52ad026c9c8c2333f008b4757e4"
+    "sha": "163bc21ca2120058a04555ef0dcc4eebb7fa39a2"
   },
   "class": {
     "qualityGates": "linux-only",
@@ -13,28 +13,28 @@
     {
       "file": ".github/workflows/ci.yml",
       "master": "hosting-platforms/github/workflows/callers/go/ci.yml",
-      "sha256": "9f4098e66455b0c70a14fe1efc96ff6196965603d7cb07953d61e246a2247dd7"
+      "sha256": "834769ae1bc3881bb63bcecba9659da8a3b19140029ef4011ce8c69ae2a7a8d2"
     },
     {
       "file": ".github/workflows/codeql.yml",
       "master": "hosting-platforms/github/workflows/callers/go/codeql.yml",
-      "sha256": "473d6ff8462040a75cb59787ee4b74928d8a7d743fddd238aad9b8aa98336820"
+      "sha256": "bf9e7940106d3c5bc7ea27f2052132cfc293a27d09b1db83b3f9569249eef008"
     },
     {
       "file": ".github/workflows/dependency-review.yml",
       "master": "hosting-platforms/github/workflows/callers/go/dependency-review.yml",
-      "sha256": "a41d637b81304a5a144aa55297ca0608d3e52f68a958ce6da8762620d84b8e57"
+      "sha256": "cbb4066be301ea2177b4e092e08d2ac96a351f6b77540f7ad3d2f08d56e5d6c2"
     },
     {
       "file": ".github/workflows/canonical-conformance.yml",
       "master": "hosting-platforms/github/workflows/callers/go/canonical-conformance.yml",
-      "sha256": "2154a663834d58677cafeebec82e6be7bccd1d4312d041f3ffa26aa27d05c522"
+      "sha256": "09f46e4e12c79872214a30ca6d4ef6e5796f7c43119bb3f95d20378119e83d6b"
     }
   ],
   "files": {
     "lefthook": { "path": "lefthook.yml", "sha256": "86562f27a6a34b252028b74fb39ba0373636bf539e6c4d2d5b820a362971520a" },
     "gitattributes": { "path": ".gitattributes", "sha256": "d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c" },
-    "gitignore": { "path": ".gitignore", "sha256": "9093ce2107811c34afeecfa9b22101ac6b82d5dda40fa71cf90efbb23e51bbf5" },
+    "gitignore": { "path": ".gitignore", "fragments": ["core", "go/core"], "sha256": "45ea39aa330ab47051c7dfd71e8fd9c5e8332f6c89b76f0a53111e668eb3b0f7" },
     "dependabot": { "path": ".github/dependabot.yml", "sha256": "a28369d1dc1b8eb6cdcef8405fccca644a509fc640fdc8ab3f12adbc0291940a" }
   },
   "codeowners": { "path": ".github/CODEOWNERS", "defaultOwner": "@CyberT33N" },
