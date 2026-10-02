@@ -84,7 +84,7 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/t33n-software/git-governance v1.0.2-0.20260830080026-69a7b981e779 // indirect
 	github.com/t33n-software/go-quality-authority v1.1.0 // indirect
-	github.com/t33n-software/license-hub v0.0.0-20260830165735-6f63ab95be35 // indirect
+	github.com/t33n-software/license-hub v1.0.0 // indirect
 	github.com/t33n-software/repository-governance v1.2.0 // indirect
 	github.com/tidwall/jsonc v0.3.3 // indirect
 	github.com/urfave/cli/v3 v3.10.1 // indirect
